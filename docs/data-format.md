@@ -1,230 +1,166 @@
-# BoxCop collection and evaluation data format
+# Data formats
 
-This is BoxCop's current implementation contract, not Ent's private schema.
-Start with the [complete synthetic transfer capture](examples/synthetic-transfer/)
-and the commands below. Collector evidence, reconstructed hypotheses, and evaluator
-labels are separate data layers. Never put answer labels into model inputs.
+BoxCop has two processes that exchange data: the Swift app and the Python engine
+(`boxcop-engine`). This page describes the protocol between them, the security
+event format the app shows, and the files BoxCop writes.
 
-## Files and versions
+## The engine's command-line modes
 
-| Artifact | Version / shape | Purpose |
-| --- | --- | --- |
-| Exported journal | `boxcop.workflow.journal.v1`, JSONL | One envelope and event per newline; replay/reconstruction input. On-disk journals are [encrypted](journal-encryption.md); explicitly decrypt/export first. |
-| UI export | `boxcop.workflow.v2`, JSON object | Bounded `events` array plus `synthetic`, `droppedEvents`, retention and limitations; not directly accepted by journal replay |
-| Writer health | Unversioned `health.json` | `written`, `dropped`, `evictedSegments` nonnegative integers; `failed` boolean |
-| Reconstruction | `boxcop.workflow.reconstruction.v1`, JSON object | Joined evidence graph and possible workflows |
-| Replay expectations | `boxcop.workflow.expectations.v1`, JSON object | Counts/order/forbidden-kind assertions; see [replay](workflow-replay.md) |
-| Example evaluation labels | `boxcop.eval.labels.v1`, JSON object | Initial fixture convention, not an app wire format or implemented model scorer |
+| Mode | Purpose |
+| --- | --- |
+| `--data-dir DIR` | The pipe service the app keeps running. See the next section. |
+| `--self-test` | Offline check of the frozen engine. Prints one line of JSON and exits 0 on success. |
+| `--protection-status --data-dir DIR` | One-shot state of package and script routing. |
+| `--host-agent-hook claude\|codex\|cursor` | Evaluates one agent action from standard input and prints the agent's allow or deny response. |
+| `--host-agent-integrations auto\|install\|status\|remove` | Manages BoxCop's entries in agent settings. |
+| `--human-review` | The approval inbox service used by the app. |
+| `--package-setup status\|disable` | Reports or removes package routing without the app. |
+| `--software-inventory [--cache] [--root PATH]` | Scans installed software and prints the inventory. |
+| `--software-remediation prepare\|apply` | Prepares or applies a guided update. |
+| `--contain [--allow-host HOST[:PORT]]... -- COMMAND` | Runs one command contained. |
 
-User/native/browser/agent events share the user journal. Endpoint Security has a
-separate root-private journal. Each collector timeline has its own session and
-sequence; there is no global sequence. Endpoint identity is supplied to the offline
-reconstructor, not authenticated by journal contents.
-
-## Journal envelope
-
-Each UTF-8 line is a complete JSON object followed by a newline:
+`--self-test` output:
 
 ```json
-{
-  "schemaVersion": "boxcop.workflow.journal.v1",
-  "synthetic": true,
-  "droppedBefore": 0,
-  "event": {
-    "id": "a1111111-1111-4111-8111-111111111111",
-    "sessionID": "b2222222-2222-4222-8222-222222222222",
-    "sequence": 1,
-    "observedAt": "2026-01-01T00:00:01Z",
-    "receivedAt": "2026-01-01T00:00:01Z",
-    "kind": "browser_file_selected",
-    "phase": "observed",
-    "collector": "browser.extension",
-    "provenance": "reported",
-    "availability": "available",
-    "fields": {
-      "file_name": {"value": "report.txt", "provenance": "reported", "availability": "available", "truncated": false}
-    },
-    "relatedEventIDs": []
-  }
-}
+{"ok": true, "schema": "boxcop.self-test.v1", "engine": "rules", "protocol": 1,
+ "checks": {"rules": true, "package_feed": true, "registry_firewall": true,
+            "containment": true, "approvals": true, "inventory": true, "triage": true}}
 ```
 
-The example above is formatted for reading; JSONL must put the entire object on
-one line. `synthetic` describes the capture, independent of provenance. A fake
-kernel event can have `provenance: observed` while its envelope is synthetic.
-Real VM collection of synthetic interactions currently uses the normal journal
-writer (`synthetic: false`); fixture reports separately identify the test. Do not
-assume every VM record is synthetic or relabel a whole mixed capture.
+It touches no user data, opens no network connection and loads no model. The
+build runs it against the frozen engine before and after signing.
 
-`droppedBefore` is a cumulative writer loss counter sampled for the row, not a
-per-row delta. Preserve health alongside segments; do not sum cumulative counters
-across rows. Retention eviction differs from queue loss and kernel loss. A missing
-newline indicates a possible crash-truncated tail, not a valid final record.
+`--protection-status` output:
 
-## Event and field types
-
-| Event key | Type | Contract |
-| --- | --- | --- |
-| `id`, `sessionID` | UUID strings | Event identity and timeline lifetime; clearing/restarting a timeline changes its session |
-| `sequence` | integer ≥ 1 | Increases within a session; gaps are evidence-quality issues |
-| `observedAt`, `receivedAt` | ISO-8601 strings with timezone | Observation and timeline acceptance times; may be equal and are not guaranteed monotonic |
-| `kind`, `collector` | nonempty strings | Event family and producing API/adapter |
-| `phase` | string | Common values `observed`, `attempted`; not a successful-action flag |
-| `provenance` | string | Common values `observed`, `reported`, `derived`, `declared`, `unknown`; preserve rather than upgrade |
-| `availability` | string | `available` or a collector-specific failure/coverage reason |
-| `bundleID`, `windowTitle` | optional string | Native context when present; Swift omits nil optionals |
-| `pid` | optional integer | Native process identifier; insufficient alone to identify a process lifetime |
-| `fields` | object of field objects | Kind-specific evidence; numeric values here are strings |
-| `relatedEventIDs` | array of UUID strings | Explicit references, usually nearby context; maximum 16 emitted by the timeline; not causal proof |
-
-Each field has `value` (string or null/omitted for Swift nil), `provenance` string,
-`availability` string and `truncated` boolean. For example, unavailable file bytes:
-`{"value":null,"provenance":"observed","availability":"not_collected","truncated":false}`.
-Missing, null and empty are not interchangeable. Unknown is not benign, failed,
-or zero. Swift bounds field strings to 4,096 characters and window titles to 512.
-The reconstructor excludes unavailable or truncated fields from identity matching.
-Collectors may additionally signal truncation through availability or companion
-fields; do not treat `truncated: false` as proof of complete source content.
-
-## Collected event families
-
-Fields below are available vocabulary, not guaranteed presence on every event.
-
-| Kinds | Collector / key evidence | Limits |
-| --- | --- | --- |
-| `app_focus`, app lifecycle events | `NSWorkspace`; native PID/bundle | Focus is not action attribution |
-| `window_context` | `Accessibility.focusedWindow`; title, selected text and accessibility context | Requires permission; missing UI attributes remain unavailable |
-| `mouse_click` | `NSEvent.mouseDown`; `button`, `target_attribution` | Frontmost app attribution, not exact semantic target |
-| `clipboard_change_observed`, `paste_attempt`, `paste_shortcut_passed` | `NSPasteboard+CGEventTap` / `CGEventTap`; `clipboard_revision`, `monitor_generation`, `insertion` | Journal rows do not contain the clipboard payload; shortcut passage does not prove insertion |
-| `policy_decision` | `rules+sequence`; `action`, `audit_record_id`, clipboard snapshot IDs | References its observed input; policy output is not ground truth |
-| `file_change` | `FSEvents`; `path`, `flags`, `stream_event_id`, unavailable `responsible_process` / `file_read` | Changes, not reads or process attribution |
-| `visual_context` | `ScreenCaptureKit.window`; `artifact_path`, derived `recognized_text`, `recognition_confidence` | Screenshot is a separate local artifact; OCR is derived, permission-dependent and bounded |
-| `file_open`, `process_exec` | `EndpointSecurity`; `executable`, `effective_uid`, `audit_uid`, `pid_version`, `parent_pid`, `signing_id`, `team_id`, `code_signing_flags`, kernel sequence metadata | Notification only; no file bytes or command arguments |
-| `file_open` additional fields | `path`, `open_flags`, unavailable `file_contents` | Open does not prove bytes read; paths can be truncated |
-| `collector_health` | Collector-specific availability plus fields such as `missing_events`, `unclean_previous_stop` | Coverage/loss evidence, not user activity |
-| `browser_context`, `browser_navigation`, `browser_focus`, `browser_click`, `browser_copy`, `browser_paste`, `browser_file_selected` | `browser.extension`; document identity, URL/title, context/selection, element and file metadata | Same-user reported evidence; untrusted page text; file selection is not upload |
-| `browser_request`, `browser_download` | Request/download identifiers and transport state | Completion is not SaaS acceptance or verified destination identity |
-| `agent_instruction`, `agent_tool_call`, `agent_tool_result` | `agent.hook`; instruction/run/call/tool/result metadata | Requires explicit hooks/wrapper; not automatic agent discovery |
-
-Browser field vocabulary: `url`, `page_title`, `tab_id`, `frame_id`, `navigation_id`
-(Chrome document ID), `browser_session`, `element_role`, `element_label`,
-`selected_text`, `context_text`, `context_truncated`, `account_scope`,
-`account_evidence`, `file_name`, `file_size`, `mime_type`, `download_id`,
-`transfer_state`, `bytes_received`, `referrer`, `request_id`, `request_method`,
-`request_type`, `status_code`, `network_error`, `initiator`.
-`browser_upload` is accepted by ingress but is not proof that a built-in collector
-observed a completed upload. Request states are `started`, `completed`, `failed`;
-download completion uses `complete`. HTTP status is a string, e.g. `"403"`.
-
-Agent vocabulary: `run_id`, `parent_id`, `call_id`, `tool`, `instruction`,
-`arguments`, `result_summary`, `status`, `resource`, `process_id`, `duration_ms`.
-Run/call identity remains reported. `process_id` is a string-valued field and is
-not interchangeable with the event's native integer `pid`.
-
-Ingress is a different format: `{"version":1,"kind":"…","fields":{"key":"value"}}`.
-It accepts only allowed browser/agent kinds and keys, at most 16 string fields,
-4,096 characters per value and 65,536 bytes total. The app adds event IDs, timestamps
-and provenance. Browser URL is required; agent `run_id` must be nonempty. URL
-userinfo, query and fragment are removed. Requests do not collect bodies, cookies
-or authorization headers. Declared personal/managed account scope is not verified
-SaaS identity. See `AdapterEvent.decode` in `Workflow.swift` for the allowlist.
-`browser_composition` (Gmail draft lifecycle) has its own closed key set and values, with
-no page title or text; see [review reminders](human-review-reminders.md#developer-contract).
-Browser events carry `observed_at_ms`: browser epoch milliseconds taken when the extension
-callback fired, before the native queue, so queued delivery cannot reorder them. The app uses
-it as `observedAt`, never later than arrival; `receivedAt` remains arrival time.
-
-## Reconstructed graph as evaluation input
-
-[Reconstruction](workflow-reconstruction.md) documents matching rules and bounds.
-The JSON report includes:
-
-- `endpointID`, `synthetic`, `status`, `evidenceComplete`, input/unlinked counts.
-- `sources` and `issues`: preserve journal losses, gaps, clock regressions and
-  clipping; `evidenceComplete` means no detected issues, not exhaustive visibility.
-- `nodes`: original event IDs and provenance with source names. Default output
-  keeps selected metadata; `--include-events` preserves full event fields for
-  content-dependent evaluations. Unlinked events are counted but not included as
-  nodes, even with that option; use the raw journals for complete retained input.
-- `links`: `id`, `from`, `to`, `relation`, `strength`, `reason`,
-  `causationEstablished`. Strength is `recorded_reference`, `shared_identifier`
-  or `candidate`, not a probability. All current links leave causation false.
-- `workflows`: `id`, `kind`, `anchorEventID`, `eventIDs`, `linkIDs`,
-  `transportOutcomes`, `causationEstablished`, `accountIdentity`. Kinds include
-  `possible_file_transfer`, `possible_copy_paste`, `native_paste_attempt`,
-  `agent_run`, `agent_tool_activity`. Application outcome and account identity
-  remain unknown even after HTTP 201.
-- `ambiguities`: candidate counts and emitted counts; do not discard competing
-  same-name file paths when constructing an evaluation prompt.
-
-## Generate and validate a synthetic case
-
-```sh
-python3 tools/workflows/synthetic_transfer.py /tmp/boxcop-transfer-001
-python3 tools/workflows/replay.py /tmp/boxcop-transfer-001/native.jsonl
-python3 tools/workflows/replay.py /tmp/boxcop-transfer-001/endpoint.jsonl
-python3 tools/workflows/reconstruct.py \
-  --source native=/tmp/boxcop-transfer-001/native.jsonl \
-  --source endpoint=/tmp/boxcop-transfer-001/endpoint.jsonl \
-  --endpoint-id synthetic-endpoint --include-events \
-  --report /tmp/boxcop-transfer-001/graph.json
+```json
+{"schema": "boxcop.protection-status.v1",
+ "package": {"configured": false, "routed": false, "listening": false},
+ "scripts": {"routed": false, "listening": false}}
 ```
 
-The generator refuses an existing output directory, creates private files, uses
-deterministic UUIDs/timestamps and makes no network requests. It writes two source
-journals and a **separate** `labels.json`. The checked-in example is reproducible.
-The older `synthetic.py` remains a small eight-event replay smoke fixture.
+`configured` means the build carries a malware feed channel. `routed` means the
+user's `~/.npmrc` points at BoxCop. `listening` means the local listener is
+answering, which is only true while the app's engine is running.
 
-The label convention records `caseID`, `endpointID`, `task`, `split`,
-`anchorEventID`, `expected`, nullable `policyLabel`, and explanatory `notes`.
-The included case tests reconstruction and uncertainty, not allow/block accuracy.
-For policy evals, first specify the policy and version in the dataset manifest;
-label actions independently of BoxCop's `policy_decision` records. Keep labels
-and future events outside the prompt for a decision-at-time task. Separate latent
-scenario truth (e.g. a fictional file really was sent) from what the supplied
-evidence justifies (e.g. delivery remains unknown).
+## The pipe protocol
 
-Use unique session/case IDs when combining generated cases. Keep all variants of
-one scenario/template in the same train/dev/test split to avoid leakage. Vary file
-names/paths, apps, destinations, timing, process lifetimes, request outcomes and
-content, rather than only paraphrasing a single case. Include benign workflows,
-sensitive content, duplicate basenames, intervening clipboard copies, PID reuse,
-missing document IDs, HTTP rejection/network failure, absent content, truncation,
-writer/kernel loss and untrusted page instructions. Do not hide missing evidence
-or fabricate trusted actor identity to make cases easy.
+The app starts `boxcop-engine --data-dir <dir>` and exchanges newline-delimited
+JSON over standard input and output. There is no HTTP server on this path.
 
-Before model benchmarking, freeze a dataset manifest (generator/version/seed,
-policy version, split and case hashes), input projection and scoring rubric.
-Score uncertainty/abstention and unsupported claims as well as task accuracy;
-track local-model latency, memory and false-positive/false-negative rates. No model
-runner or policy scoring implementation is added by this data-format document.
+Request: `{"version": 1, "id": "<1-64 chars of A-Z a-z 0-9 _ ->", "op": "<operation>", ...}`
 
-For runnable model comparisons using this contract, see the [model evaluation guide](model-evaluation.md).
+Response: `{"version": 1, "id": "<same id>", "ok": true, "result": {...}}`, or
+`{"version": 1, "id": ..., "ok": false, "error": {"code": ..., "message": ...}}`.
 
-### Native agent policy audit actions
+| Operation | Extra fields | Result |
+| --- | --- | --- |
+| `status` | none | `ready`, `protocol`, `engine`, `network_listener`, and `package_registry_listener` / `install_script_listener` when those listeners are up |
+| `security_events` | `limit` (1 to 200) | `events`: a list, newest first |
+| `package_protection` | `action`: `status`, `enable`, `disable` | `packageProtection` |
+| `script_protection` | `action`: `status`, `enable`, `disable`, `allow`, `revoke`; `package`; `host` | `scriptProtection` |
+| `workflow_context` | `context` | `workflow`: counts and signals for [smart triage](workflow-context.md) |
+| `workflow_clear` | none | `workflowCleared` |
+| `shutdown` | none | `stopped`; the engine then exits |
 
-The policy `EventInput`/SQLite audit contract now also accepts `action=read` and
-`action=write`. These are distinct from collector event kinds and do not change
-`boxcop.workflow.v2`. Claude native callbacks record `app=claude`, a hashed
-session ID, `source=reported-native-hook:<reported cwd>`, and the resolved file
-path in `destination`. Read bytes are not loaded by the hook; Write/Edit supplied
-text is evaluated transiently and persisted as `[not retained]`. Path resolution
-is a preflight snapshot, not proof that the subsequent access used that inode.
-The main clipboard history excludes these agent records before pagination;
-the audit store retains them for inspection and replay.
+Rules:
 
-### Supply-chain assessment and ordinary-user authorization
+- Each line is at most 262,144 bytes including the newline, in both directions.
+  A longer request ends the session.
+- A request must have exactly the fields of its operation. Unknown operations,
+  extra fields, duplicate keys and non-finite numbers are rejected with
+  `invalid_request`.
+- Error messages are fixed text. They never include request content or internal
+  error details.
 
-The supply-chain slice adds `host_authorization` denial events to the existing workflow
-envelope, four deterministic decision policy IDs, and a separate explicit-root inventory
-report (`boxcop.software-inventory.v1`). See [field definitions and limits](supply-chain-protection.md#data-and-vm-reproduction).
-Metadata findings are not authenticated artifact identity and are not automatically
-joined to process events or promoted into OS authorization policy.
+Example:
 
-## Software exposure inventory
+```json
+{"version":1,"id":"a","op":"status"}
+{"version":1,"id":"a","ok":true,"result":{"ready":true,"protocol":1,"engine":"rules","monitoring":false,"network_listener":false}}
+```
 
-The automatic bounded scanner emits `boxcop.software-inventory.v2` in a private
-local cache and `software_inventory` summary events in the workflow journal. See
-[the complete format and trust boundary](software-exposure.md#durable-format).
-Metadata version matches are findings only; they do not prove executable identity,
-exploitation or blocking. Synthetic fixture reports are marked `synthetic: true`.
+## Security events
+
+`security_events` returns one list of what the engine's layers blocked or held.
+The app merges it with network extension events and software findings, which it
+reads from their own sources, to build the Events list.
+
+```json
+{"id": "stable string",
+ "time": "2026-11-12T20:15:03Z",
+ "layer": "install_gate",
+ "outcome": "blocked",
+ "title": "Blocked install of evil-pkg 1.2.3",
+ "reason": "This release is listed as malicious by datadog.",
+ "subject": "evil-pkg@1.2.3",
+ "agent": null,
+ "command": null,
+ "package": "evil-pkg",
+ "host": null,
+ "policy_ids": ["known-malicious-package"]}
+```
+
+| Field | Values |
+| --- | --- |
+| `layer` | `install_gate`, `containment`, `agent_actions` |
+| `outcome` | `blocked`, `held`, `approved`, `rejected`, `warned` |
+| `title` | A short plain sentence |
+| `reason` | One or two plain sentences saying why |
+| `subject` | `package@version`, a host, a path, or a short command summary |
+| `agent` | `claude`, `codex`, `cursor` or null |
+| `command` | A redacted command line, or null. Present only for approval requests, which store the command for review. |
+| `package`, `host` | A name, or null |
+| `policy_ids` | The rules that matched |
+
+Events never contain secrets or file content. The sources are:
+
+| Source | Layer | Stored in |
+| --- | --- | --- |
+| Agent hook denials | `agent_actions`, or `install_gate` for skill files and known-malicious packages | the audit database |
+| Approval requests and their outcome | `agent_actions` | `human-review/state.json` |
+| Registry firewall blocks | `install_gate` | `package-protection/blocks.json` |
+| Refused connections from contained scripts and runs | `containment` | `script-protection/blocked-connections.json` |
+
+## Files
+
+Everything the engine and app write is under
+`~/Library/Application Support/BoxCop/`. The directory is mode 0700 and files
+are 0600. The engine refuses to start with a data directory that is not private
+and owned by the user.
+
+| Path | Contents | Holds command text or content? |
+| --- | --- | --- |
+| `events.sqlite3` | Decision audit: one row per evaluated agent action with the agent, action kind, hashed session, working directory, matched policies and decision | No. Content is stored as `[not retained]`. |
+| `human-review/state.json` | Approval rules and requests | Yes: the full action arguments, so the person reviews exactly what they approve. Up to 100 active and 100 finished requests. |
+| `human-review/summaries.json` | Model summaries of requests, kept beside them | Model output only |
+| `<agent>-receipt.json`, `<agent>-<action>-receipt.json` | Last hook callback per agent and per action | No |
+| `agent-integrations.json`, `*.config-backup` | What BoxCop added to agent settings, and exact backups of the settings it edited | The backups are copies of your agent settings |
+| `package-protection/` | The verified malware list (`policy.json`), keys for local artifact links, `blocks.json` | Package names and versions |
+| `script-protection/` | The script wrapper, `exceptions.json`, `blocked-connections.json`, the `~/.npmrc` change receipt | Package names and hostnames |
+| `software-inventory.json` | Latest inventory, schema `boxcop.software-inventory.v2` | Software names, versions and paths |
+| `software-remediation-results.json`, `software-console/` | Outcomes and console output of guided updates | Package manager output, with URL credentials redacted |
+| `models/workflow/` | The local model | No |
+| `workflows/` | The app's activity journal, encrypted | Event details; see [journal-encryption.md](journal-encryption.md) |
+
+The network extension runs as root and keeps its history separately, encrypted,
+under `/Library/Application Support/BoxCopNetwork.noindex/`; see
+[outgoing-connections.md](outgoing-connections.md). The app talks to it over the
+Unix socket `/var/run/local.boxcop.network.sock`.
+
+Blocked-event logs (`blocks.json`, `blocked-connections.json`) are bounded to the
+newest 200 entries. A repeat of the same block raises a counter instead of adding
+an entry. Logging is best effort: a failed log write never changes a block
+decision.
+
+## Schemas named in the code
+
+| Schema | Where |
+| --- | --- |
+| `boxcop.self-test.v1` | `server/self_test.py` |
+| `boxcop.protection-status.v1` | `server/self_test.py`, `BoxCopCore/ProtectionStatus.swift` |
+| `boxcop.status.v1` | `BoxCop --status --json`, `BoxCopCore/ProtectionStatus.swift` |
+| `boxcop.software-inventory.v2` | `server/software_inventory.py` |
+| `boxcop.workflow-context.v1` | `server/workflow_context.py`, `BoxCopCore/WorkflowContext.swift` |
+| `boxcop.package-channel.v1` | `server/package_channel.py`: the feed URL and key pinned in a build |
+| `allay.package-policy.v1` | `server/package_intelligence.py`: the signed malware list. The name is unchanged because BoxCop reads the existing Allay feed. |
+| `boxcop.encrypted.v1` | `BoxCopCore/JournalEncryption.swift`: one encrypted journal record |

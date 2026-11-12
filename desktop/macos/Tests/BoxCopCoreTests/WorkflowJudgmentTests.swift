@@ -2,20 +2,6 @@ import XCTest
 @testable import BoxCopCore
 
 final class WorkflowJudgmentTests: XCTestCase {
-    func testWorkflowUsageIsDecodedAndValidated() throws {
-        let counters: [String: Int] = ["attempts": 2, "ready": 1, "uncertain": 1, "unsupported": 0, "unavailable": 0, "error": 0]
-        var usage: [String: Any] = ["persistence_ok": true, "backends": ["minilm-head-v1": counters, "qwen3.5-4b-workflow-v2": counters]]
-        func decode() throws -> WorkflowJudgmentStatus {
-            let value: [String: Any] = ["state": "waiting", "model": "Qwen", "promptVersion": "workflow-judgment-v2", "advisoryOnly": true, "modelUsage": usage]
-            return try JSONDecoder().decode(WorkflowJudgmentStatus.self, from: JSONSerialization.data(withJSONObject: value))
-        }
-        XCTAssertEqual(try decode().modelUsage?.qwen.attempts, 2)
-        XCTAssertTrue(try decode().isValid)
-        var invalid = counters; invalid["ready"] = 3
-        usage["backends"] = ["minilm-head-v1": counters, "qwen3.5-4b-workflow-v2": invalid]
-        XCTAssertThrowsError(try decode())
-    }
-
     func testSetupProgressIsBounded() throws {
         var status: [String: Any] = ["state": "reviewing", "model": "Qwen3.5-4B-Q4_K_M",
             "promptVersion": "workflow-judgment-v1", "advisoryOnly": true,

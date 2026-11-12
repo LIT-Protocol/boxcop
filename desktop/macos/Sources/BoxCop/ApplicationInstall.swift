@@ -1,7 +1,7 @@
 #if os(macOS)
 import AppKit
 
-/// Run before constructing the model, updater, login item, or session owner.
+/// Run before constructing the model, updater or login item.
 @MainActor enum ApplicationInstall {
     static func prepareLaunch() -> Bool {
         let source = Bundle.main.bundleURL

@@ -40,67 +40,40 @@ final class WorkflowContextTests: XCTestCase {
     func testExactProcessInstanceAndReportedAgentScopesRemainDistinct() {
         var importer = NetworkWorkflowImporter(), timeline = WorkflowTimeline()
         importer.ingest(page([event(0), event(1), event(2, version: 4)]), into: &timeline)
-        let first = timeline.append(kind: "agent_instruction", collector: "agent.hook", at: now, provenance: "reported",
-            fields: ["run_id": WorkflowField("run", provenance: "reported"), "hook_source": WorkflowField("claude", provenance: "reported")])
-        let second = timeline.append(kind: "agent_tool_call", collector: "agent.hook", at: now.addingTimeInterval(3), provenance: "reported",
-            fields: ["run_id": WorkflowField("run", provenance: "reported"), "hook_source": WorkflowField("claude", provenance: "reported")])
-        let other = timeline.append(kind: "agent_tool_call", collector: "agent.hook", at: now.addingTimeInterval(4), provenance: "reported",
-            fields: ["run_id": WorkflowField("run", provenance: "reported"), "hook_source": WorkflowField("cursor", provenance: "reported")])
+        func decision(_ agent: String, at offset: TimeInterval) -> UUID {
+            timeline.append(kind: "security_event", collector: "engine", at: now.addingTimeInterval(offset), provenance: "reported",
+                            fields: ["agent": WorkflowField(agent, provenance: "reported"), "outcome": WorkflowField("blocked")])
+        }
+        let first = decision("claude", at: 0), second = decision("claude", at: 3), other = decision("cursor", at: 4)
         let context = WorkflowContext.build(from: timeline, sources: [], now: now.addingTimeInterval(5))
         XCTAssertEqual(context.links.filter { $0.relation == "same_kernel_process_instance" }.count, 1)
-        XCTAssertTrue(context.links.contains { $0.sourceEventID == first && $0.targetEventID == second && $0.relation == "same_agent_run_reported" })
+        XCTAssertTrue(context.links.contains { $0.sourceEventID == first && $0.targetEventID == second && $0.relation == "same_agent_reported" })
         XCTAssertFalse(context.links.contains { $0.targetEventID == other })
         XCTAssertTrue(context.links.contains { $0.strength == "candidate" }) // bare PID/reused PID is only a candidate
     }
-    func testNetworkBurstKeepsOtherInputsAndArtifactReferencesWithoutReadingThem() throws {
+    func testNetworkBurstDoesNotCrowdOutProtectionDecisions() throws {
         var timeline = WorkflowTimeline()
-        let image = timeline.append(kind: "visual_context", collector: "ScreenCaptureKit.window", pid: 42, at: now,
-            fields: ["capture_id": WorkflowField("image-1"), "artifact_path": WorkflowField("/does-not-exist/fake.png"),
-                     "recognized_text": WorkflowField("Synthetic screen text", provenance: "derived")])
-        let prompt = timeline.append(kind: "agent_instruction", collector: "agent.hook", at: now,
-            provenance: "reported", fields: ["instruction": WorkflowField("Synthetic prompt", provenance: "reported")])
+        let blocked = timeline.append(kind: "security_event", collector: "engine", at: now, provenance: "reported",
+            fields: ["layer": WorkflowField("install_gate"), "outcome": WorkflowField("blocked"), "package": WorkflowField("evil-pkg")])
         var importer = NetworkWorkflowImporter()
         let events = (1...90).map { event($0) }
         importer.ingest(page(events), into: &timeline)
         importer.ingest(page(events, after: importer.cursor), into: &timeline)
-        let context = WorkflowContext.build(from: timeline, sources: [.init("screen", "active", "consented")], now: now.addingTimeInterval(100))
+        let context = WorkflowContext.build(from: timeline, sources: [.init("network", "active", "extension")], now: now.addingTimeInterval(100))
         XCTAssertLessThanOrEqual(context.events.count, 64)
-        XCTAssertTrue(context.events.contains { $0.id == image })
-        XCTAssertTrue(context.events.contains { $0.id == prompt })
-        XCTAssertEqual(context.artifacts.first?.localPath, "/does-not-exist/fake.png")
-        XCTAssertGreaterThan(context.omittedEvents, 0)
-        XCTAssertLessThanOrEqual(try context.exportData().count, 96 * 1024)
-    }
-    func testEmailReviewHistorySurvivesBrowserByteBudgetPressure() throws {
-        var timeline = WorkflowTimeline()
-        var evidence = Set<UUID>()
-        for turn in 0..<3 {
-            for kind in ["agent_instruction", "agent_tool_result"] {
-                evidence.insert(timeline.append(kind: kind, collector: "agent.hook",
-                    at: now.addingTimeInterval(Double(turn * 120)), provenance: "reported",
-                    fields: ["run_id": WorkflowField("synthetic-run"), "hook_source": WorkflowField("test"),
-                             "instruction": WorkflowField(String(repeating: "Synthetic revision. ", count: 20))]))
-            }
-        }
-        evidence.insert(timeline.append(kind: "browser_email_draft", collector: "browser.extension",
-            at: now.addingTimeInterval(300), fields: ["body_text": WorkflowField("Synthetic final email")]))
-        for _ in 0..<40 {
-            _ = timeline.append(kind: "browser_request", collector: "browser.extension",
-                at: now.addingTimeInterval(301), fields: ["url": WorkflowField(String(repeating: "x", count: 3000))])
-        }
-        let context = WorkflowContext.build(from: timeline, sources: [], now: now.addingTimeInterval(302))
-        XCTAssertTrue(evidence.isSubset(of: Set(context.events.map(\.id))))
+        XCTAssertTrue(context.events.contains { $0.id == blocked })
+        XCTAssertTrue(context.artifacts.isEmpty)
         XCTAssertGreaterThan(context.omittedEvents, 0)
         XCTAssertLessThanOrEqual(try context.exportData().count, 96 * 1024)
     }
     func testBudgetsMissingReferencesAndNetworkOnlyPrivacy() throws {
         var timeline = WorkflowTimeline()
         for _ in 0..<30 {
-            timeline.append(kind: "window_context", collector: "Accessibility", at: now,
+            timeline.append(kind: "security_event", collector: "engine", at: now,
                 fields: Dictionary(uniqueKeysWithValues: (0..<20).map { ("field\($0)", WorkflowField(String(repeating: "a", count: 4097))) }), relatedEventIDs: [UUID()])
         }
         var importer = NetworkWorkflowImporter(); importer.ingest(page([event(0)]), into: &timeline)
-        let context = WorkflowContext.build(from: timeline, sources: [.init("screen", "permission_missing", "not available")], now: now)
+        let context = WorkflowContext.build(from: timeline, sources: [.init("network", "disabled_or_unavailable", "not available")], now: now)
         XCTAssertLessThanOrEqual(try context.exportData().count, 96 * 1024)
         XCTAssertTrue(context.issues.contains("context_window_or_budget_omissions"))
         XCTAssertTrue(context.issues.contains("collector_coverage_incomplete"))
@@ -110,9 +83,8 @@ final class WorkflowContextTests: XCTestCase {
     }
     func testWireUsesISO8601AndReportsUpstreamTruncation() throws {
         var timeline = WorkflowTimeline()
-        let adapter = try AdapterEvent.decode(Data(#"{"version":1,"kind":"agent_tool_call","fields":{"run_id":"run","arguments":"short clipped text","status":"arguments_truncated"}}"#.utf8))
-        XCTAssertTrue(adapter.fields["arguments"]!.truncated)
-        timeline.append(kind: adapter.kind, collector: adapter.collector, at: now, provenance: "reported", fields: adapter.fields)
+        timeline.append(kind: "security_event", collector: "engine", at: now, provenance: "reported",
+                        fields: ["command": WorkflowField("short clipped text", provenance: "reported", truncated: true)])
         let context = WorkflowContext.build(from: timeline, sources: [], now: now)
         let wire = try WireCodec.encode(id: "workflow", command: .workflowContext(context))
         let object = try JSONSerialization.jsonObject(with: wire) as! [String: Any]
@@ -121,13 +93,13 @@ final class WorkflowContextTests: XCTestCase {
         XCTAssertEqual(payload["enforcement"] as? String, "context_only_not_authorization")
         XCTAssertTrue(context.issues.contains("truncated_fields"))
     }
-    func testBrowserNetworkDomainMatchIsOnlyCandidateAndTimeBounded() {
+    func testDecisionNetworkHostMatchIsOnlyCandidateAndTimeBounded() {
         var timeline = WorkflowTimeline(), importer = NetworkWorkflowImporter()
-        let browser = timeline.append(kind: "browser_request", collector: "browser.extension", at: now, provenance: "reported",
-            fields: ["url": WorkflowField("https://example.com/upload", provenance: "reported")])
+        let decision = timeline.append(kind: "security_event", collector: "engine", at: now, provenance: "reported",
+            fields: ["host": WorkflowField("example.com", provenance: "reported")])
         importer.ingest(page([event(2), event(20)]), into: &timeline)
         let context = WorkflowContext.build(from: timeline, sources: [], now: now.addingTimeInterval(21))
-        let candidates = context.links.filter { $0.sourceEventID == browser }
+        let candidates = context.links.filter { $0.sourceEventID == decision }
         XCTAssertEqual(candidates.count, 1)
         XCTAssertEqual(candidates.first?.relation, "nearby_destination_context")
         XCTAssertEqual(candidates.first?.strength, "candidate")

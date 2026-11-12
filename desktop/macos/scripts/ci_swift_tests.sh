@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
-# CI-only: run the Swift package tests on a macOS CI runner with streamed output and a
-# hard deadline per run.
+# Run the Swift package tests with streamed output and a hard deadline per run.
+# Written for CI runners; it also works on a development Mac.
 #
 # First runs the XCTest bundle directly with unbuffered output, so the log shows which test
 # is running. Then runs `swift test --skip-build` the way build_app.py does. If a run passes

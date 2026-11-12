@@ -5,6 +5,9 @@ public struct NetworkThreatMatch: Codable, Sendable {
     public let source: String
     public let revision: String
     public let reason: String
+    public init(hostname: String, source: String, revision: String, reason: String) {
+        self.hostname = hostname; self.source = source; self.revision = revision; self.reason = reason
+    }
 }
 
 public struct NetworkThreatStatus: Codable, Sendable {

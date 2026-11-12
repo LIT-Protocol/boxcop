@@ -23,7 +23,7 @@ def test_unknown_is_not_a_vulnerability_claim(version):
     'mise install php@8.4.26', 'asdf install php 8.2.34', 'phpenv install php 8.5.11',
 ])
 def test_literal_install_blocked(tmp_path,command):
-    r=Engine(Store(tmp_path/'audit.db')).evaluate(EventInput(session_id='s',actor='agent',role='engineering',action='command',app='test',content=command))
+    r=Engine(Store(tmp_path/'audit.db')).evaluate(EventInput(session_id='s',action='command',app='test',content=command))
     assert r.decision.action=='block'
     assert command not in str(r.model_dump())
 

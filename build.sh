@@ -6,9 +6,9 @@ usage() {
   cat <<'HELP'
 Usage: ./build.sh [OUTPUT_DIRECTORY]
 
-Build the current working tree as a Developer ID signed, notarized BoxCop build (beta channel by default; all shipping protections included).
-Defaults to a new BoxCop-beta-TIMESTAMP directory in ~/Downloads.
-Share BoxCop.dmg from that directory after a successful build.
+Build the current working tree as a Developer ID signed, notarized BoxCop.app with
+the network extension embedded. Defaults to a new BoxCop-CHANNEL-TIMESTAMP directory
+in ~/Downloads. Share BoxCop.dmg from that directory after a successful build.
 
 Requires macOS 14+, Xcode/Command Line Tools, CMake, Python 3.12, a Developer ID
 Application certificate with its private key, app and network Developer ID
@@ -19,11 +19,16 @@ Optional environment variables:
   BOXCOP_NOTARY_PROFILE    Saved Keychain profile (default: sentinel-beta)
   BOXCOP_KEYCHAIN_PATH     Optional temporary CI keychain for notarization
   BOXCOP_PYTHON            Python 3.12 executable (default: python3.12)
-  BOXCOP_VERSION           Optional display version (major.minor.patch; required by release CI)
-  BOXCOP_CHANNEL           beta (default) or stable; both include outgoing protection
+  BOXCOP_VERSION           Optional display version (major.minor.patch; set by release CI)
+  BOXCOP_CHANNEL           beta (default) or stable; both include every protection
   BOXCOP_APP_PROFILE       App profile (default: ~/.sentinel-lab/profiles/Allay_Developer_ID.provisionprofile)
   BOXCOP_NETWORK_PROFILE   Network profile (default: ~/.sentinel-lab/profiles/Allay_Network_Developer_ID.provisionprofile)
   BOXCOP_EXTENSION_VERSION Override extension build number (default: current Unix timestamp)
+  BOXCOP_PACKAGE_FEED_URL                 Signed package malware feed (default: the Allay feed)
+  BOXCOP_PACKAGE_FEED_PUBLIC_KEY_BASE64   Ed25519 key that feed is verified with
+  BOXCOP_PACKAGE_FEED_MINIMUM_SEQUENCE    Lowest feed sequence this build accepts (default: 1)
+  BOXCOP_UPDATE_FEED_URL   Sparkle appcast URL. Unset (default): the build has no in-app updates
+  BOXCOP_UPDATE_PUBLIC_KEY Ed25519 public key for that appcast; required with the URL
 
 The script tests, builds, signs, notarizes, staples, and checks Gatekeeper.
 It does not publish, install, or launch the app. Existing builds are not overwritten.
@@ -67,7 +72,9 @@ channel="${BOXCOP_CHANNEL:-beta}"
 [[ "$channel" == beta || "$channel" == stable ]] || fail 'BOXCOP_CHANNEL must be beta or stable.'
 app_profile="${BOXCOP_APP_PROFILE:-$HOME/.sentinel-lab/profiles/Allay_Developer_ID.provisionprofile}"
 network_profile="${BOXCOP_NETWORK_PROFILE:-$HOME/.sentinel-lab/profiles/Allay_Network_Developer_ID.provisionprofile}"
-[[ -f "$app_profile" && -f "$network_profile" ]] || fail 'Distribution profiles missing from ~/.sentinel-lab/profiles. Set BOXCOP_APP_PROFILE and BOXCOP_NETWORK_PROFILE to override. Endpoint Security approval is not required.'
+[[ -f "$app_profile" && -f "$network_profile" ]] || fail 'Distribution profiles missing from ~/.sentinel-lab/profiles. Set BOXCOP_APP_PROFILE and BOXCOP_NETWORK_PROFILE to override.'
+# The provisioning profiles are bound to the original bundle identifiers and still
+# carry their original file names. BoxCop keeps both until it has profiles of its own.
 # Share one version scheme with CI so switching build sources preserves ordering.
 extension_version="${BOXCOP_EXTENSION_VERSION-$(date +%s)}"
 [[ "$extension_version" =~ ^[1-9][0-9]*$ ]] || fail 'BOXCOP_EXTENSION_VERSION must be an increasing positive integer.'
@@ -77,6 +84,13 @@ printf 'Checking notarization credentials for Keychain profile: %s\n' "$profile"
 notary_args=(history --keychain-profile "$profile" --output-format json)
 if [[ -n "${BOXCOP_KEYCHAIN_PATH:-}" ]]; then notary_args+=(--keychain "$BOXCOP_KEYCHAIN_PATH"); fi
 xcrun notarytool "${notary_args[@]}" >/dev/null || fail 'Notarization credentials unavailable. Configure the Keychain profile with xcrun notarytool store-credentials, then retry.'
+
+# Install gate: BoxCop has no malware feed of its own yet. It consumes the existing
+# signed Allay feed, so a local build blocks listed packages without extra setup.
+# The key is public; the feed is verified with it and never trusted without it.
+export BOXCOP_PACKAGE_FEED_URL="${BOXCOP_PACKAGE_FEED_URL:-https://getallay.ai/package-feed/v1/policy.json}"
+export BOXCOP_PACKAGE_FEED_PUBLIC_KEY_BASE64="${BOXCOP_PACKAGE_FEED_PUBLIC_KEY_BASE64:-4vFHQbvIWeK3TVnv7vCjb8M0yTisaM1hpvnUA3F6ZYw=}"
+export BOXCOP_PACKAGE_FEED_MINIMUM_SEQUENCE="${BOXCOP_PACKAGE_FEED_MINIMUM_SEQUENCE:-1}"
 
 output="${1:-$HOME/Downloads/BoxCop-${channel}-$(date +%Y%m%d-%H%M%S)}"
 printf 'Building current source: %s\nDistribution output: %s\n' "$repo_root" "$output"

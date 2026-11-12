@@ -1,4 +1,6 @@
-# Install script protection
+# Containment: install script protection
+
+This is BoxCop's containment layer.
 
 Packages can run their own scripts while npm installs them. Those scripts start
 as ordinary processes with the developer's full network access. Install script
@@ -6,9 +8,9 @@ protection contains them: **a dependency's install script, and everything it
 starts, can only connect to approved destinations.** The decision is made before
 any connection to the destination is opened.
 
-This is **opt-in** and independent of the [package registry firewall](package-registry-firewall.md).
-It needs no Endpoint Security entitlement, Network Extension change, private API
-or TLS interception. It works locally without an account.
+This is **opt-in** and independent of the [registry firewall](package-registry-firewall.md).
+It needs no special entitlement, no network extension, no private API and no TLS
+interception, so it also works in a limited-development build.
 
 ## How it works
 
@@ -47,8 +49,8 @@ through those paths.
 
 ## What the developer sees
 
-When a destination is refused, BoxCop shows a panel and lists the attempt under
-**Install script protection**:
+When a destination is refused, BoxCop notifies you and lists the attempt in
+Events:
 
 > Claude Code started an install of some-package@1.0.0, whose postinstall script
 > tried to connect to unknown-domain.example. BoxCop blocked the connection
@@ -56,7 +58,9 @@ When a destination is refused, BoxCop shows a panel and lists the attempt under
 
 **Allow for this package** approves that one hostname for that one package name.
 Run the install again afterwards. Approvals are listed and removable, and are
-stored in `exceptions.json` in the script-protection folder.
+stored in `exceptions.json` in the script-protection folder. Refused connections
+are logged beside it in `blocked-connections.json` with the package, host and
+agent, and nothing else.
 
 ## When BoxCop is not running
 
@@ -99,6 +103,30 @@ folder; remove the marked block from `~/.npmrc` to stop using it.
 - `sandbox-exec` is marked deprecated by Apple. It is present and working on
   macOS 27; enabling fails with an explanation if it is unavailable.
 
+## Running one command contained
+
+The engine can apply the same sandbox and proxy to a single command:
+
+```sh
+ENGINE=/Applications/BoxCop.app/Contents/Resources/engine/boxcop-engine
+$ENGINE --contain --allow-host registry.npmjs.org -- npm ci
+$ENGINE --contain -- ./downloaded-script.sh        # no network at all
+```
+
+The command and everything it starts can reach only the hosts named with
+`--allow-host` (`host` allows ports 80 and 443; `host:port` allows that port).
+Writes are denied to shell startup files, npm and git configuration,
+LaunchAgents, `~/.ssh` and coding-agent configuration folders. Reads are denied
+to the usual credential locations: `~/.ssh`, `~/.aws`, `~/.gnupg`, cloud CLI
+folders, `~/.netrc` and the Keychains folder. The command's exit code is passed
+through, and refused connections appear in Events.
+
+If the sandbox cannot be started, the command is not run. The same limits apply
+as above: programs that ignore the proxy variables simply have no network, an
+allowed host can still be misused, and files outside the denied locations can
+be read. Nothing runs contained automatically through this mode yet; applying it
+to agent-written scripts and downloads is on the [roadmap](roadmap.md).
+
 ## Validation
 
 ```sh
@@ -115,7 +143,7 @@ one request, both writes fail, the attempt is reported with the package name,
 and the project's own `npm run` script is unaffected. Elsewhere the sandbox
 tests are skipped; the routing, policy and proxy tests run on any platform.
 
-Not yet established: behavior in a signed, installed build; popular packages
+Not yet established: behavior in a signed, installed build at scale; popular packages
 with native builds or binary downloads at scale; pnpm; and performance
 on installs with many scripts (each contained script adds two short process
 launches and one local request).

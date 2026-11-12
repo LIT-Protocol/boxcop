@@ -57,17 +57,13 @@ def test_edited_block_and_symlink_require_explicit_recovery(tmp_path):
         enable(tmp_path, state)
 
 
-def test_disable_restores_routing_before_launchd_failure(tmp_path, monkeypatch, capsys):
+def test_setup_disable_restores_routing_and_reports_status(tmp_path, monkeypatch, capsys):
     from tools.package_service import management_main
     monkeypatch.setattr('tools.package_service.Path.home', lambda: tmp_path)
     monkeypatch.setattr('tools.package_service.state_directory', lambda: tmp_path / 'state')
     enable(tmp_path, tmp_path / 'state')
-    plist = tmp_path / 'Library/LaunchAgents/com.boxcop.package-protection.plist'
-    plist.parent.mkdir(parents=True)
-    plist.write_text('fixture')
-    def failure(*args, **kwargs):
-        raise OSError('launchctl unavailable')
-    monkeypatch.setattr('tools.package_service.subprocess.run', failure)
-    assert management_main(['disable']) == 1
-    assert not status(tmp_path)['configured']
-    assert json.loads(capsys.readouterr().out)['summary'].startswith('Package protection setup failed')
+    assert management_main(['disable']) == 0
+    assert not status(tmp_path)['configured'] and not status(tmp_path)['managed']
+    assert json.loads(capsys.readouterr().out)['routed'] is False
+    assert management_main(['enable']) == 1
+    assert json.loads(capsys.readouterr().out)['summary'] == 'Turn on package protection in the BoxCop app'

@@ -17,9 +17,9 @@ final class ProcessTests: XCTestCase {
         let state = await client.snapshot()
         XCTAssertTrue(state.ready)
         let pid = try XCTUnwrap(state.pid)
-        let result = try await client.request(.recent(5))
-        guard case let .recent(items, total) = result else { return XCTFail("Not recent") }
-        XCTAssertTrue(items.isEmpty); XCTAssertEqual(total, 0)
+        let result = try await client.request(.securityEvents(5))
+        guard case let .securityEvents(items) = result else { return XCTFail("Not events") }
+        XCTAssertTrue(items.isEmpty)
         await client.stop()
         let stopped = await client.snapshot()
         XCTAssertFalse(stopped.ready); XCTAssertNil(stopped.pid)
@@ -37,18 +37,18 @@ final class ProcessTests: XCTestCase {
     func testStderrCannotBlockOrLeakToCaller() async throws {
         let client = EngineClient(requestTimeout: 1)
         try await client.start(configuration: config("stderr"))
-        do { _ = try await client.request(.policies); XCTFail("Expected safe error") }
+        do { _ = try await client.request(.workflowClear); XCTFail("Expected safe error") }
         catch { XCTAssertEqual(error as? EngineFailure, .invalidRequest); XCTAssertFalse(String(describing: error).contains("PRIVATE_MARKER")) }
         await client.stop()
     }
     func testTimeoutDisconnectsAndRestartDropsObsoleteReplies() async throws {
         let client = EngineClient(requestTimeout: 0.15)
         try await client.start(configuration: config("slow"))
-        do { _ = try await client.request(.recent(1)); XCTFail("Expected timeout") }
+        do { _ = try await client.request(.securityEvents(1)); XCTFail("Expected timeout") }
         catch { XCTAssertEqual(error as? EngineFailure, .timedOut) }
         try await client.start(configuration: config())
-        let result = try await client.request(.recent(1))
-        guard case .recent = result else { return XCTFail("Not recent") }
+        let result = try await client.request(.securityEvents(1))
+        guard case .securityEvents = result else { return XCTFail("Not events") }
         await client.stop()
     }
     func testPauseKillsChildAndCompletesPendingRequest() async throws {
@@ -56,7 +56,7 @@ final class ProcessTests: XCTestCase {
         try await client.start(configuration: config("slow"))
         let running = await client.snapshot()
         let pid = try XCTUnwrap(running.pid)
-        let pending = Task { try await client.request(.recent(1)) }
+        let pending = Task { try await client.request(.securityEvents(1)) }
         try await Task.sleep(nanoseconds: 30_000_000)
         await client.stop()
         do { _ = try await pending.value; XCTFail("Pending request escaped stop") }
@@ -66,9 +66,9 @@ final class ProcessTests: XCTestCase {
     func testBackpressureIsBoundedAndVisible() async throws {
         let client = EngineClient(requestTimeout: 2, maximumPending: 1)
         try await client.start(configuration: config("slow"))
-        let pending = Task { try await client.request(.recent(1)) }
+        let pending = Task { try await client.request(.securityEvents(1)) }
         try await Task.sleep(nanoseconds: 30_000_000)
-        do { _ = try await client.request(.recent(1)); XCTFail("Expected backpressure") }
+        do { _ = try await client.request(.securityEvents(1)); XCTFail("Expected backpressure") }
         catch { XCTAssertEqual(error as? EngineFailure, .backpressure) }
         await client.stop(); _ = try? await pending.value
     }

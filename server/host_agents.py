@@ -1,6 +1,8 @@
-"""Bundled, same-user harness preflight and reversible user-level registration.
-No HTTP service, bearer token, interpreter installation or agent launcher is required.
-These cooperative hooks are not an OS sandbox or authenticated agent identity.
+"""Pre-action hooks for coding agents, and their reversible user-level registration.
+
+The agent's harness calls the hook before a shell command or file action and
+honors its answer. These cooperative hooks are not an OS sandbox and do not
+authenticate the agent.
 """
 from datetime import datetime, timezone
 import fcntl
@@ -10,7 +12,6 @@ import os
 from pathlib import Path
 import shlex
 import signal
-import socket
 import stat
 import sys
 import tempfile
@@ -29,18 +30,6 @@ ACTIONS = {
     'cursor': {event: event for event in ('beforeShellExecution', *CURSOR_READ_EVENTS)},
 }
 MESSAGE = 'BoxCop held this action. Revise it to avoid sensitive data or unsafe execution, then submit the revised action. Do not retry through a different tool.'
-# Opt-in agent corrections observe allowed actions after the response is written.
-CORRECTIONS_MARKER = 'agent-corrections.on'  # Present only while they are on: off costs one stat.
-CORRECTIONS_GAP = 'agent-corrections-gap.json'  # Time of the last possibly missed observation.
-CORRECTIONS_START = 1.0  # Observe only if this preflight decided within 1 s ...
-CORRECTIONS_BUDGET = .3  # ... under one 0.3 s timer for the import and the work.
-CORRECTIONS_GAP_BUDGET = .05  # Separate timer to record a missed observation, without the module.
-CORRECTIONS_LATE = 2.9  # A later decision records only the missed observation, so the process
-                        # still ends inside the 3 s preflight deadline.
-
-
-class CorrectionDeadline(BaseException):
-    """Ends opt-in correction work. Not an Exception, so no ordinary handler swallows it."""
 
 
 def unique(pairs):
@@ -158,9 +147,9 @@ def normalize(harness, payload):
     if not native:
         command = resolved_shell_paths(command, cwd)
     return {'session_id': harness + '-' + hashlib.sha256(session.encode()).hexdigest()[:32],
-            'actor': 'agent', 'role': 'engineering', 'action': action, 'app': harness,
+            'action': action, 'app': harness,
             'source': ('reported-native-hook' if native else 'reported-shell-hook') + (':' + cwd if cwd else ''), 'destination': destination,
-            'content': command, 'declared_intent': '', 'synthetic': False}
+            'content': command, 'declared_intent': ''}
 
 
 def native_path(path, cwd, *, require_absolute=False):
@@ -245,21 +234,6 @@ def receipt(directory, harness, state, *, tool=None, **fields):
     atomic(directory / (harness + '-receipt.json'), value)
 
 
-def collect(directory, event, decision):
-    frame = {'version': 1, 'kind': 'agent_tool_call', 'fields': {
-        'run_id': event['session_id'], 'tool': event['app'] + ':' + event['action'],
-        'status': 'preflight_' + decision + ('_arguments_truncated' if len(event.get('content', '')) > 4096 else ''),
-        'arguments': event.get('content', '')[:4096], 'hook_source': event['app'], 'process_id': str(os.getppid())}}
-    try:
-        with socket.socket(socket.AF_UNIX) as sock:
-            sock.settimeout(.15)
-            sock.connect(str(directory / 'collector.sock'))
-            sock.sendall(json.dumps(frame).encode() + b'\n')
-            sock.recv(1024)
-    except OSError:
-        pass  # Audit is already committed. Collection delivery is best-effort, never authorization.
-
-
 def cursor_imported_event(payload):
     """Cursor imports Claude registrations but sends its own preToolUse envelope.
 
@@ -297,10 +271,8 @@ def hook(harness, directory):
     allowed = False
     explanation = 'BoxCop could not evaluate this action. Retry after checking BoxCop and its local audit storage. No action was approved.'
     started = time.monotonic()
-    engine = None
     tool = None
     receipt_harness = harness
-    observed = None
     def expired(*_):
         raise TimeoutError('deadline')
     signal.signal(signal.SIGALRM, expired)
@@ -323,14 +295,13 @@ def hook(harness, directory):
         else:
             tool = callback_tool(harness, payload)
             event = normalize(harness, payload)
-            observed = payload
         # Deterministic rules only: no model downloads, inference or network calls.
         # SQLite's normal 10s busy wait exceeds vendor hook deadlines. A busy or
         # unavailable audit must produce an explicit deny before the harness times out.
         from .human_review import gate
         engine = Engine(_private_store(str(directory), timeout=.2), classifier=ContentClassifier(),
                         action_gate=lambda: gate(directory, event, payload))
-        record = engine.evaluate(EventInput(**event), retain_preview=False)
+        record = engine.evaluate(EventInput(**event))
         allowed = record.decision.action == 'allow'
         if not allowed:
             explanation = ' '.join(record.decision.reasons)
@@ -340,7 +311,6 @@ def hook(harness, directory):
         receipt(directory, receipt_harness, 'observed', tool=tool, decision=record.decision.action,
                 record_id=record.id, session_id=event['session_id'],
                 elapsed_ms=round((time.monotonic() - started) * 1000, 3))
-        collect(directory, event, record.decision.action)
     except Exception:
         allowed = False
         try:
@@ -349,47 +319,7 @@ def hook(harness, directory):
             pass
     finally:
         signal.setitimer(signal.ITIMER_REAL, 0)
-        if engine:
-            engine.classifier.close()
     print(json.dumps(response(harness, allowed, explanation)))
-    elapsed = time.monotonic() - started
-    if allowed and observed is not None and harness != 'cursor' and elapsed < CORRECTIONS_LATE:
-        # Opt-in agent-corrections record, only after the final response is written,
-        # so it cannot change it. It is not off the critical path: the native
-        # supervisor and the vendor both wait for this process to exit, so it delays
-        # the allowed tool call by its run time, bounded by the timer below. One
-        # timer bounds the import, the work and gap marking; with the 1 s start limit the process ends well inside the 3 s
-        # preflight deadline the native supervisor already allows for. A later
-        # decision only records that this observation was missed.
-        def stop(*_):
-            raise CorrectionDeadline()
-        try:
-            sys.stdout.flush()
-            if os.path.lexists(directory / CORRECTIONS_MARKER):
-                completed = False
-                if elapsed < CORRECTIONS_START:
-                    try:
-                        try:
-                            until = time.monotonic() + CORRECTIONS_BUDGET
-                            signal.signal(signal.SIGALRM, stop)
-                            signal.setitimer(signal.ITIMER_REAL, CORRECTIONS_BUDGET)
-                            from .agent_corrections import observe_preflight
-                            completed = observe_preflight(harness, directory, observed, until) is True
-                        finally:
-                            signal.setitimer(signal.ITIMER_REAL, 0)
-                    except BaseException:
-                        completed = False
-                if not completed:
-                    # Not observed (too late, import failure, timer, error): record that
-                    # under its own small timer, independent of the correction module.
-                    signal.signal(signal.SIGALRM, stop)
-                    signal.setitimer(signal.ITIMER_REAL, CORRECTIONS_GAP_BUDGET)
-                    try:
-                        atomic(directory / CORRECTIONS_GAP, {'at': time.time()})
-                    finally:
-                        signal.setitimer(signal.ITIMER_REAL, 0)
-        except BaseException:
-            pass
     return 0
 
 
@@ -612,13 +542,6 @@ def integrations(mode, home, directory, executable):
         if result['harnesses'].get('codex', {}).get('state') == 'configured_not_observed':
             result['summary'] += '. Codex: review BoxCop in /hooks, then start a new session.'
         result['summary'] += ' Observed callbacks are historical, not a guarantee of current coverage.'
-        if mode == 'remove':
-            # Removing all BoxCop hooks also removes opt-in agent-correction entries.
-            try:
-                from .agent_corrections import remove_with_integrations
-                result['agent_corrections'] = remove_with_integrations(home, directory, executable)
-            except Exception:
-                result['agent_corrections'] = {'summary': 'Agent corrections: removal unavailable.'}
         if mode != 'status':
             atomic(state_path, result)
         return result

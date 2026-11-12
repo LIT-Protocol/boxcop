@@ -2,7 +2,7 @@
 import Foundation
 import BoxCopCore
 
-/// Dedicated background sidecar: context IPC/model work never queues ahead of a paste decision.
+/// A dedicated engine for the local model, so model work never queues ahead of protection requests.
 @MainActor final class WorkflowReviewClient {
     private var engine: EngineClient?
     private var task: Task<Void, Never>?
@@ -34,19 +34,19 @@ import BoxCopCore
                 if engine == nil {
                     let client = EngineClient()
                     engine = client
-                    let directory = FileManager.default.homeDirectoryForCurrentUser.appendingPathComponent("Library/Application Support/BoxCop/workflow-review")
-                    try await client.start(configuration: EngineConfiguration.resolve(bundleURL: Bundle.main.bundleURL, environment: ProcessInfo.processInfo.environment, dataDirectory: directory))
+                    guard let configuration = EngineTools.configuration(dataDirectory: EngineTools.dataDirectory.appendingPathComponent("workflow-review")) else { throw EngineFailure.invalidConfiguration }
+                    try await client.start(configuration: configuration)
                 }
                 guard let engine, !Task.isCancelled else { return }
                 if clearPending { _ = try await engine.request(.workflowClear); clearPending = false }
                 guard token == generation else { return }
                 if case .workflow(let assessment) = try await engine.request(.workflowContext(context)), token == generation, !Task.isCancelled {
-                    update("Local context: \(assessment.eventCount) observations · \(assessment.linkCount) links · \(assessment.classifiedFields) text fields classified · \(assessment.signals.count) review signals" + (assessment.incomplete ? " · incomplete coverage" : "") + ". Advisory only.", assessment.judgment)
+                    update("Reviewed \(assessment.eventCount) recent events.", assessment.judgment)
                 }
                 if token != generation || clearPending { _ = try? await engine.request(.workflowClear); clearPending = false }
             } catch {
                 NSLog("BoxCop workflow request failure: %@", (error as? EngineFailure)?.rawValue ?? "unknown")
-                if token == generation { update("Local context reviewer unavailable. " + ((error as? EngineFailure)?.description ?? "Review request failed.") + " Timeline and deterministic protection continue.", nil) }
+                if token == generation { update("The local model is unavailable. " + ((error as? EngineFailure)?.description ?? "The request failed.") + " Protection is not affected.", nil) }
                 await engine?.stop(); engine = nil
             }
         }

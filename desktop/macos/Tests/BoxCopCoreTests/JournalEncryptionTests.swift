@@ -72,7 +72,7 @@ final class JournalEncryptionTests: XCTestCase {
         defer { try? FileManager.default.removeItem(at: root) }
         let journal = try WorkflowJournal(directory: source, encryption: cipher)
         var timeline = WorkflowTimeline(); timeline.onAppend = { journal.append($0) }
-        timeline.append(kind: "browser_copy", collector: "fixture", fields: ["text": WorkflowField("private-text")])
+        timeline.append(kind: "security_event", collector: "fixture", fields: ["text": WorkflowField("private-text")])
         await journal.flush()
         try JournalExport.run(purpose: "workflow", source: source, destination: output, encryption: cipher)
         let exported = try FileManager.default.contentsOfDirectory(at: output, includingPropertiesForKeys: nil)
@@ -100,31 +100,6 @@ final class JournalEncryptionTests: XCTestCase {
         XCTAssertEqual(first.count, 32)
         XCTAssertEqual(first, second)
         XCTAssertThrowsError(try JournalEncryption.keychainKey(purpose: "missing", create: false, allowInteraction: false, keychainPath: path))
-    }
-    func testNodeAgentWriterDecryptsWithSwiftAndProvisioningPreservesKey() throws {
-        let cipher = try journalTestCipher()
-        let dir = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString)
-        try FileManager.default.createDirectory(at: dir, withIntermediateDirectories: false, attributes: [.posixPermissions: 0o700])
-        defer { try? FileManager.default.removeItem(at: dir) }
-        try AgentJournalKey.provision(directory: dir, cipher: cipher)
-        let publicFile = dir.appendingPathComponent("agent-egress-public.der")
-        let originalPublic = try Data(contentsOf: publicFile)
-        try AgentJournalKey.provision(directory: dir, cipher: cipher)
-        XCTAssertEqual(try Data(contentsOf: publicFile), originalPublic)
-        let wrapped = try Data(contentsOf: dir.appendingPathComponent("agent-egress-private.enc"))
-        let key = try AgentJournalKey.privateKey(cipher.open(wrapped))
-        var repo = URL(fileURLWithPath: #filePath)
-        for _ in 0..<5 { repo.deleteLastPathComponent() }
-        let script = "const fs=require('fs'),c=require('crypto');const {auditWriter}=require(process.argv[1]);const k=c.createPublicKey({key:fs.readFileSync(process.argv[2]),format:'der',type:'pkcs1'});auditWriter(process.argv[3],k)({host:'private.example'});"
-        let process = Process(); process.executableURL = URL(fileURLWithPath: "/usr/bin/env")
-        let file = dir.appendingPathComponent("events.jsonl")
-        process.arguments = ["node", "-e", script, repo.appendingPathComponent("adapters/agent_egress.cjs").path, publicFile.path, file.path]
-        try process.run(); process.waitUntilExit()
-        XCTAssertEqual(process.terminationStatus, 0)
-        let record = Data(try Data(contentsOf: file).dropLast())
-        let row = try AgentJournalKey.open(record, key: key)
-        XCTAssertTrue(String(decoding: row, as: UTF8.self).contains("private.example"))
-        XCTAssertFalse(String(decoding: record, as: UTF8.self).contains("private.example"))
     }
 #endif
 

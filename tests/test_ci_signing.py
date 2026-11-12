@@ -21,6 +21,8 @@ def setup_env(monkeypatch, tmp_path):
         monkeypatch.setenv(name, base64.b64encode(b'synthetic fixture').decode())
     for name in ['BOXCOP_CERTIFICATE_PASSWORD', 'BOXCOP_NOTARY_APPLE_ID', 'BOXCOP_NOTARY_PASSWORD']:
         monkeypatch.setenv(name, 'synthetic-secret')
+    monkeypatch.setenv('BOXCOP_TEAM_ID', 'ABCDE12345')
+    monkeypatch.setenv('BOXCOP_SIGNING_IDENTITY', 'a' * 40)
 
 
 def test_installs_then_restores_search_list_and_removes_files(tmp_path, monkeypatch):
@@ -37,10 +39,15 @@ def test_installs_then_restores_search_list_and_removes_files(tmp_path, monkeypa
     module.install()
     directory = tmp_path / 'boxcop-signing'
     assert not (directory / 'identity.p12').exists()
-    assert (directory / 'Allay_Developer_ID.provisionprofile').read_bytes() == b'synthetic fixture'
+    assert (directory / 'app.provisionprofile').read_bytes() == b'synthetic fixture'
+    assert (directory / 'network.provisionprofile').read_bytes() == b'synthetic fixture'
     environment = (tmp_path / 'environment').read_text()
     assert 'synthetic-secret' not in environment
     assert 'BOXCOP_KEYCHAIN_PATH=' in environment
+    # The signing team and certificate come from configuration, not from the script.
+    assert 'BOXCOP_SIGNING_IDENTITY=' + 'A' * 40 + '\n' in environment
+    store = next(command for command in commands if command[:3] == ['xcrun', 'notarytool', 'store-credentials'])
+    assert store[store.index('--team-id') + 1] == 'ABCDE12345'
     assert any(command[:3] == ['xcrun', 'notarytool', 'store-credentials'] and '--keychain' in command for command in commands)
     module.cleanup()
     assert not directory.exists()
@@ -52,6 +59,24 @@ def test_missing_secret_fails_without_creating_files(tmp_path, monkeypatch):
     setup_env(monkeypatch, tmp_path)
     monkeypatch.delenv('BOXCOP_NOTARY_PASSWORD')
     with pytest.raises(RuntimeError, match='Missing required'):
+        module.install()
+    assert not (tmp_path / 'boxcop-signing').exists()
+
+
+def test_missing_secret_is_named_but_no_value_is_printed(tmp_path, monkeypatch):
+    setup_env(monkeypatch, tmp_path)
+    monkeypatch.delenv('BOXCOP_CERTIFICATE_BASE64')
+    with pytest.raises(RuntimeError) as error:
+        module.install()
+    assert 'BOXCOP_CERTIFICATE_BASE64' in str(error.value)
+    assert 'synthetic-secret' not in str(error.value)
+
+
+@pytest.mark.parametrize('name,value', [('BOXCOP_TEAM_ID', 'short'), ('BOXCOP_SIGNING_IDENTITY', '-')])
+def test_malformed_team_or_identity_fails_without_creating_files(tmp_path, monkeypatch, name, value):
+    setup_env(monkeypatch, tmp_path)
+    monkeypatch.setenv(name, value)
+    with pytest.raises(RuntimeError, match='BOXCOP_TEAM_ID'):
         module.install()
     assert not (tmp_path / 'boxcop-signing').exists()
 

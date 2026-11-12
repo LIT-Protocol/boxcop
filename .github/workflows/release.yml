@@ -1,6 +1,11 @@
 name: Release BoxCop
 run-name: Release BoxCop ${{ inputs.version || '(auto patch)' }} from main
 
+# Manual only. Builds the Developer ID signed, notarized app with the network
+# extension and publishes a GitHub release in LIT-Protocol/boxcop.
+# Required secrets and variables are listed in docs/releasing.md. The first step
+# stops with their names when any are missing.
+
 on:
   workflow_dispatch:
     inputs:
@@ -16,11 +21,16 @@ concurrency:
   group: boxcop-release
   cancel-in-progress: false
 
+env:
+  # Update feed: explicit configuration, never a baked-in domain.
+  BOXCOP_UPDATE_FEED_URL: ${{ vars.BOXCOP_UPDATE_FEED_URL }}
+  BOXCOP_UPDATE_PUBLIC_KEY: ${{ vars.BOXCOP_UPDATE_PUBLIC_KEY }}
+
 jobs:
   release:
     if: github.ref == 'refs/heads/main'
-    runs-on: warp-macos-26-arm64-6x
-    timeout-minutes: 60
+    runs-on: macos-15
+    timeout-minutes: 90
     permissions:
       contents: write
     steps:
@@ -31,23 +41,45 @@ jobs:
       - uses: actions/setup-python@6d4fd22b20465ccc0f7354476588e8df7c9ca0e0 # v7.1.0
         with:
           python-version: '3.12'
+      - name: Check that signing and update configuration exists
+        env:
+          BOXCOP_CERTIFICATE_BASE64: ${{ secrets.BOXCOP_CERTIFICATE_BASE64 }}
+          BOXCOP_CERTIFICATE_PASSWORD: ${{ secrets.BOXCOP_CERTIFICATE_PASSWORD }}
+          BOXCOP_APP_PROFILE_BASE64: ${{ secrets.BOXCOP_APP_PROFILE_BASE64 }}
+          BOXCOP_NETWORK_PROFILE_BASE64: ${{ secrets.BOXCOP_NETWORK_PROFILE_BASE64 }}
+          BOXCOP_NOTARY_APPLE_ID: ${{ secrets.BOXCOP_NOTARY_APPLE_ID }}
+          BOXCOP_NOTARY_PASSWORD: ${{ secrets.BOXCOP_NOTARY_PASSWORD }}
+          BOXCOP_TEAM_ID: ${{ secrets.BOXCOP_TEAM_ID }}
+          BOXCOP_SIGNING_IDENTITY: ${{ secrets.BOXCOP_SIGNING_IDENTITY }}
+          BOXCOP_SPARKLE_PRIVATE_KEY: ${{ secrets.BOXCOP_SPARKLE_PRIVATE_KEY }}
+        run: |
+          python3.12 desktop/macos/scripts/ci_signing.py check
+          missing=""
+          [ -n "$BOXCOP_SPARKLE_PRIVATE_KEY" ] || missing="$missing BOXCOP_SPARKLE_PRIVATE_KEY(secret)"
+          [ -n "$BOXCOP_UPDATE_FEED_URL" ] || missing="$missing BOXCOP_UPDATE_FEED_URL(variable)"
+          [ -n "$BOXCOP_UPDATE_PUBLIC_KEY" ] || missing="$missing BOXCOP_UPDATE_PUBLIC_KEY(variable)"
+          if [ -n "$missing" ]; then
+            echo "::error title=Release is not configured::Missing:$missing. See docs/releasing.md."
+            exit 1
+          fi
       - name: Validate main and new version
         env:
           GH_TOKEN: ${{ github.token }}
           RELEASE_VERSION: ${{ inputs.version }}
-        run: python3.12 desktop/macos/scripts/release.py prepare --version "$RELEASE_VERSION"
+        run: |
+          python3.12 -m venv .venv
+          .venv/bin/python -m pip install --disable-pip-version-check -r requirements.txt
+          .venv/bin/python desktop/macos/scripts/release.py prepare --version "$RELEASE_VERSION"
       - name: Refresh bundled threat-domain list
         # Ship the newest upstream snapshot; fail rather than release a stale or broken list.
         env:
           GH_TOKEN: ${{ github.token }}
         run: python3.12 desktop/macos/scripts/refresh_threat_domains.py --max-age-days 2
-      - name: Toolchain and release regression tests
+      - name: Toolchain and tests
         run: |
           test "$(uname -m)" = arm64
           command -v cmake >/dev/null || brew install cmake
-          python3.12 -m venv .venv
-          .venv/bin/python -m pip install -r requirements.txt
-          .venv/bin/python -m pytest -q tests/test_macos_packaging.py tests/test_ci_signing.py tests/test_protected_bundle.py tests/test_release.py tests/test_threat_domain_refresh.py
+          .venv/bin/python -m pytest -q tests
       - name: Install signing credentials
         env:
           BOXCOP_CERTIFICATE_BASE64: ${{ secrets.BOXCOP_CERTIFICATE_BASE64 }}
@@ -56,17 +88,20 @@ jobs:
           BOXCOP_NETWORK_PROFILE_BASE64: ${{ secrets.BOXCOP_NETWORK_PROFILE_BASE64 }}
           BOXCOP_NOTARY_APPLE_ID: ${{ secrets.BOXCOP_NOTARY_APPLE_ID }}
           BOXCOP_NOTARY_PASSWORD: ${{ secrets.BOXCOP_NOTARY_PASSWORD }}
+          BOXCOP_TEAM_ID: ${{ secrets.BOXCOP_TEAM_ID }}
+          BOXCOP_SIGNING_IDENTITY: ${{ secrets.BOXCOP_SIGNING_IDENTITY }}
         run: python3.12 desktop/macos/scripts/ci_signing.py install
       - name: Build, test, sign and notarize
         env:
           BOXCOP_CHANNEL: beta
+          # Optional overrides. Unset, build.sh uses the existing signed Allay package feed.
           BOXCOP_PACKAGE_FEED_URL: ${{ vars.BOXCOP_PACKAGE_FEED_URL }}
           BOXCOP_PACKAGE_FEED_PUBLIC_KEY_BASE64: ${{ vars.BOXCOP_PACKAGE_FEED_PUBLIC_KEY_BASE64 }}
-          BOXCOP_PACKAGE_FEED_MINIMUM_SEQUENCE: ${{ vars.BOXCOP_PACKAGE_FEED_MINIMUM_SEQUENCE || '1' }}
+          BOXCOP_PACKAGE_FEED_MINIMUM_SEQUENCE: ${{ vars.BOXCOP_PACKAGE_FEED_MINIMUM_SEQUENCE }}
         run: ./build.sh "$RUNNER_TEMP/out"
       - name: Verify packaged launch
         run: bash desktop/macos/scripts/ci_launch_smoke.sh "$RUNNER_TEMP/out/BoxCop.app" "$RUNNER_TEMP/out"
-      - name: Sign update feed and publish GitHub Release
+      - name: Sign update feed and publish GitHub release
         env:
           GH_TOKEN: ${{ github.token }}
           BOXCOP_SPARKLE_PRIVATE_KEY: ${{ secrets.BOXCOP_SPARKLE_PRIVATE_KEY }}
@@ -74,10 +109,7 @@ jobs:
       - name: Remove signing credentials
         if: always()
         run: python3.12 desktop/macos/scripts/ci_signing.py cleanup
-      - name: Retain build evidence
-        # A published release already carries the symbols zip, build-evidence.json and
-        # launch-smoke.txt as release assets. Keep this artifact only to debug a failed
-        # release, and never fail the run because Actions artifact storage is full.
+      - name: Retain build evidence from a failed release
         if: failure()
         continue-on-error: true
         uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2

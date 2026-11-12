@@ -1,42 +1,24 @@
-"""Registry protection owned by the app's existing engine, never by launchd."""
+"""Registry protection that runs inside the BoxCop engine."""
 import base64
 import os
 from pathlib import Path
-import plistlib
-import subprocess
 import threading
 
 from . import package_routing as routing
 from .local_package_policy import state_directory
+from .event_log import EventLog, private_directory
 from .package_channel import bundled_channel, bootstrap
 from .package_intelligence import PolicyStore
 from .package_proxy import Firewall, RegistryServer, refresh
-
-
-def remove_legacy_agent(home):
-    path = Path(home) / 'Library/LaunchAgents/com.boxcop.package-protection.plist'
-    if not path.exists():
-        return
-    value = plistlib.loads(path.read_bytes())
-    if value.get('Label') != 'com.boxcop.package-protection' or '--package-protection' not in value.get('ProgramArguments', []):
-        raise ValueError('The old package startup entry was changed; review it before migrating')
-    result = subprocess.run(['/bin/launchctl', 'bootout', f'gui/{os.getuid()}/com.boxcop.package-protection'],
-                            capture_output=True, timeout=10)
-    if result.returncode:
-        # A plist left by a failed bootstrap is removable even when not loaded.
-        probe = subprocess.run(['/bin/launchctl', 'print', f'gui/{os.getuid()}/com.boxcop.package-protection'],
-                               capture_output=True, timeout=10)
-        if probe.returncode == 0:
-            raise ValueError('Could not stop the old package background service; retry migration')
-    path.unlink()
+from .security_events import FIREWALL_LOG
 
 
 class PackageRuntime:
-    def __init__(self, *, home=None, directory=None, channel=None, port=8794, migrate=remove_legacy_agent):
+    def __init__(self, *, home=None, directory=None, channel=None, port=8794):
         self.home = Path(home) if home is not None else Path.home()
         self.directory = Path(directory) if directory is not None else state_directory()
         self.channel = bundled_channel() if channel is None else channel
-        self.port, self.migrate = port, migrate
+        self.port = port
         self.lock = threading.RLock()
         self.busy = False
         self.message = 'Ready to enable' if self.channel else 'Feed not configured in this build'
@@ -72,12 +54,9 @@ class PackageRuntime:
                 # Only routing that the user previously enabled is resumed.
                 if routing.status(self.home)['managed']:
                     operation = 'enable'
-                else:
-                    operation = 'migrate'
             if operation != 'status' and not self.busy and not self.closed.is_set():
                 self.busy = True
-                self.message = {'enable': 'Starting package protection…', 'disable': 'Disabling package routing…',
-                                'migrate': 'Checking package protection…'}[operation]
+                self.message = {'enable': 'Starting package protection…', 'disable': 'Disabling package routing…'}[operation]
                 self.worker = threading.Thread(target=self._action, args=(operation,), daemon=True)
                 self.worker.start()
             return self.status()
@@ -88,14 +67,9 @@ class PackageRuntime:
                 # Restore installs before stopping the listener; retain verified policy.
                 routing.disable(self.home, self.directory)
                 self._stop_server()
-                self.migrate(self.home)
                 self.message = 'Package routing disabled'
             else:
-                self.migrate(self.home)
-                if operation == 'enable':
-                    self._enable()
-                else:
-                    self.message = 'Ready to enable' if self.channel else 'Feed not configured in this build'
+                self._enable()
         except Exception as error:
             with self.lock:
                 self.message = str(error) if isinstance(error, ValueError) else (
@@ -116,7 +90,7 @@ class PackageRuntime:
             if self.server is not None:
                 routing.enable(self.home, self.directory)
                 return
-        self.directory.mkdir(parents=True, exist_ok=True, mode=0o700)
+        private_directory(self.directory)
         store = self.store or PolicyStore(self.directory / 'policy.json', public)
         if not store.policy or store.policy.payload['sequence'] < self.channel['minimum_sequence']:
             self.message = 'Downloading and verifying the malware list…'
@@ -135,7 +109,7 @@ class PackageRuntime:
         secret = key_path.read_bytes()
         if len(secret) != 32:
             raise ValueError('Invalid package artifact key')
-        server = RegistryServer(Firewall(store, secret), self.port)
+        server = RegistryServer(Firewall(store, secret, log=EventLog(self.directory / FIREWALL_LOG)), self.port)
         with self.lock:
             if self.closed.is_set():
                 server.server_close()

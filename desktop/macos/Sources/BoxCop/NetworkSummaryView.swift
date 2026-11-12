@@ -54,12 +54,12 @@ import BoxCopCore
             HStack(alignment: .top) {
                 VStack(alignment: .leading, spacing: 3) {
                     Text(grouping == "Domains" ? group.key : URL(fileURLWithPath: group.key).lastPathComponent).fontWeight(.medium)
-                    Text(subtitle(group)).foregroundStyle(.secondary)
+                    Text(subtitle(group)).foregroundStyle(Palette.quiet)
                 }
                 Spacer()
                 VStack(alignment: .trailing, spacing: 3) {
                     Text("\(group.attempts) attempts · \(group.blocked) blocked")
-                    Text(group.lastSeen, style: .relative).foregroundStyle(.secondary)
+                    Text(group.lastSeen, style: .relative).foregroundStyle(Palette.quiet)
                 }
             }.help(group.key)
         }.padding(.vertical, 4)
@@ -70,17 +70,17 @@ import BoxCopCore
         let processes = Set(child.rows.map(\.processName)).sorted().joined(separator: ", ")
         return VStack(alignment: .leading, spacing: 4) {
             Text(child.key).textSelection(.enabled)
-            Text("\(child.attempts) attempts · \(child.blocked) blocked · First: \(first) · Last: \(last)").foregroundStyle(.secondary)
-            Text("Processes: \(processes)").foregroundStyle(.secondary)
+            Text("\(child.attempts) attempts · \(child.blocked) blocked · First: \(first) · Last: \(last)").foregroundStyle(Palette.quiet)
+            Text("Processes: \(processes)").foregroundStyle(Palette.quiet)
             ForEach(Array(Set(child.rows.compactMap(\.blockedReason))).sorted(), id: \.self) { reason in
-                Text(reason).foregroundStyle(.orange)
+                Text(reason).foregroundStyle(Palette.amber)
             }
         }.padding(.vertical, 5).frame(maxWidth: .infinity, alignment: .leading)
     }
     var body: some View {
         VStack(alignment: .leading, spacing: 12) {
             HStack {
-                Text("Apps and destinations").font(.headline)
+                Text("Apps and hosts").font(.system(size: 12.5, weight: .semibold))
                 Spacer()
                 Picker("Time range", selection: $range) {
                     Text("Today").tag("Today")
@@ -90,13 +90,13 @@ import BoxCopCore
             if let summary {
                 let blocked = periodRows.reduce(0) { $0 + $1.blocked }
                 Text("\(Set(periodRows.map(\.app)).count) apps · \(Set(periodRows.filter(\.isDomain).map(\.destination)).count) domains · \(periodRows.reduce(0) { $0 + $1.attempts }) attempts")
-                Label(blocked == 0 ? "No blocked attempts in this period" : "\(blocked) attempts blocked: listed threat domains",
+                Label(blocked == 0 ? "No blocked attempts in this period" : "\(blocked) attempts blocked: hosts on the threat list",
                       systemImage: blocked == 0 ? "shield" : "shield.lefthalf.filled")
-                    .foregroundStyle(blocked == 0 ? Color.secondary : Color.orange)
+                    .foregroundStyle(blocked == 0 ? Palette.quiet : Palette.red)
                 Text("Statistics collected since \(summary.since.formatted(date: .abbreviated, time: .shortened)). Last 7 days includes today. Counts describe attempts, not transferred data.")
-                    .foregroundStyle(.secondary)
+                    .foregroundStyle(Palette.quiet)
                 if summary.omitted > 0 {
-                    Text("Summary capacity reached: \(summary.omitted) attempts omitted since statistics began. Totals are incomplete.").foregroundStyle(.orange)
+                    Text("Summary capacity reached: \(summary.omitted) attempts omitted since statistics began. Totals are incomplete.").foregroundStyle(Palette.amber)
                 }
                 Picker("Group by", selection: $grouping) {
                     ForEach(["Apps", "Domains", "Blocked"], id: \.self) { Text($0).tag($0) }
@@ -104,17 +104,17 @@ import BoxCopCore
                 TextField("Search apps, processes, domains or IP addresses", text: $search)
                 if groups.isEmpty {
                     Text(search.isEmpty ? (grouping == "Blocked" ? "No blocked attempts in this period." : "No activity recorded in this period yet.") : "No matching activity in this period.")
-                        .foregroundStyle(.secondary)
+                        .foregroundStyle(Palette.quiet)
                 }
                 ForEach(groups) { group in
                     groupView(group)
                 }
             } else {
-                Text("Statistics are unavailable. Update the network extension to collect app and destination summaries.")
-                    .foregroundStyle(.secondary)
+                Text("The summary is not available yet.")
+                    .foregroundStyle(Palette.quiet)
             }
-            if let error { Text(error).foregroundStyle(.orange) }
-        }
+            if let error { Text(error).foregroundStyle(Palette.amber) }
+        }.font(.system(size: 12))
     }
 }
 #endif

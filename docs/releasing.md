@@ -1,95 +1,177 @@
-# Publishing BoxCop for macOS
+# Building and releasing BoxCop
 
-Run **Actions → Release BoxCop → Run workflow**, select `main`, and leave the version
-blank to increment the highest published version's patch number (for example,
-`0.1.0` → `0.1.1`). With no published versions it starts at `0.1.0`. Drafts do not
-determine the next version, but an existing draft or tag at that version still
-blocks publication. You can enter an explicit numeric version such as `0.2.0`
-instead. The workflow is manual only. It builds the exact
-main commit selected at dispatch, tests, signs and notarizes the Apple silicon
-app and DMG, checks first launch, then publishes `v<VERSION>` with release notes,
-the DMG, a signed `appcast.xml`, SHA-256 checksums and build evidence. Releases are
-serialized and existing tags/releases are never overwritten. Versions must increase.
+There are three ways to build the app. All of them produce `BoxCop.app`,
+`BoxCop.dmg`, `BoxCop.dSYM` and `build-evidence.json` in a new output directory,
+and never overwrite an existing build.
+
+| Build | Command | Signing | Network extension |
+| --- | --- | --- | --- |
+| Distribution, local | `./build.sh` | Developer ID, notarized | Included |
+| Limited development | `python3.12 desktop/macos/scripts/build_app.py --profile limited-development --output DIR` | Ad-hoc | Not included |
+| Release | the **Release BoxCop** workflow | Developer ID, notarized | Included |
+
+Every build needs macOS 14 or later, Xcode Command Line Tools, CMake and
+Python 3.12. The build creates its own virtual environment from hash-locked
+requirement files, freezes the Python engine with PyInstaller, runs the Swift
+tests, builds the llama.cpp runtime from a checksum-pinned source archive, signs
+everything, and then exercises the signed result: the engine self-test, the
+packaged release profile and channel, and the updater startup check.
+
+## Local distribution build
 
 ```sh
-# Run from an BoxCop checkout; gh resolves its current repository owner.
+./build.sh                 # output: ~/Downloads/BoxCop-beta-<timestamp>
+./build.sh /path/to/new/output/directory
+```
+
+`build.sh` needs:
+
+- A **Developer ID Application** certificate with its private key in the Keychain.
+  With more than one, set `BOXCOP_SIGNING_IDENTITY` to the certificate's SHA-1.
+- The two **provisioning profiles**, by default
+  `~/.sentinel-lab/profiles/Allay_Developer_ID.provisionprofile` and
+  `~/.sentinel-lab/profiles/Allay_Network_Developer_ID.provisionprofile`. Override
+  with `BOXCOP_APP_PROFILE` and `BOXCOP_NETWORK_PROFILE`.
+- **Notarization credentials** saved in the Keychain with
+  `xcrun notarytool store-credentials`, by default under the profile name
+  `sentinel-beta`. Override with `BOXCOP_NOTARY_PROFILE`.
+
+The profile file names and the `~/.sentinel-lab` directory keep their original
+names. The profiles are bound to the bundle identifiers `local.sentinel.endpoint`
+and `local.sentinel.endpoint.network-filter`, which is why BoxCop keeps those
+identifiers. The build checks each profile's identifier, team, expiry,
+entitlements and certificate before it starts.
+
+Other variables:
+
+| Variable | Meaning |
+| --- | --- |
+| `BOXCOP_CHANNEL` | `beta` (default) or `stable`. Both include every layer. |
+| `BOXCOP_VERSION` | Display version, `major.minor.patch`. |
+| `BOXCOP_EXTENSION_VERSION` | Build number shared by the app and the extension. Defaults to the current Unix time, so later builds replace earlier ones. |
+| `BOXCOP_PYTHON` | Python 3.12 executable. Default `python3.12`. |
+| `BOXCOP_PACKAGE_FEED_URL`, `BOXCOP_PACKAGE_FEED_PUBLIC_KEY_BASE64`, `BOXCOP_PACKAGE_FEED_MINIMUM_SEQUENCE` | The signed package malware feed. `build.sh` defaults to the existing Allay feed; see [package-registry-firewall.md](package-registry-firewall.md). |
+| `BOXCOP_UPDATE_FEED_URL`, `BOXCOP_UPDATE_PUBLIC_KEY` | In-app updates. Unset by default; see below. |
+
+The script never falls back to ad-hoc signing and does not install, launch or
+publish anything.
+
+## Limited-development build
+
+```sh
+python3.12 desktop/macos/scripts/build_app.py --profile limited-development --output /tmp/boxcop-dev
+```
+
+This needs no certificate. It is ad-hoc signed, has no network extension, and the
+build fails if a system extension or a restricted entitlement ends up in the
+bundle. CI makes this build on every pull request. To give it a working install
+gate, export the three `BOXCOP_PACKAGE_FEED_*` variables first.
+
+## In-app updates
+
+BoxCop has no update feed yet. The checked-in `Info.plist` names no feed, and a
+build without one does not start its updater: `BoxCop --check-updater-startup`
+prints `UPDATER_STARTUP_SKIPPED`, exits 0, and the app offers no update check.
+The build fails if a bundle without a feed reports anything else.
+
+A build gets in-app updates only when both of these are set:
+
+- `BOXCOP_UPDATE_FEED_URL`: the HTTPS URL of a Sparkle appcast, ending in `.xml`.
+- `BOXCOP_UPDATE_PUBLIC_KEY`: the base64 Ed25519 public key that signs it, from
+  Sparkle's `generate_keys`.
+
+The build then writes `SUFeedURL` and `SUPublicEDKey` into the bundle and requires
+`--check-updater-startup` to start real Sparkle and report `UPDATER_STARTUP_PASS`.
+The appcast must be signed, and updates are verified before extraction; those two
+settings are fixed in `Info.plist`. Installing an update always needs the user's
+action.
+
+No update domain is built in. To host a feed, serve `appcast.xml` at the feed URL
+and each release's DMG at `<feed directory>/v<VERSION>/`, which is the layout the
+release script signs for.
+
+## The Release workflow
+
+**Actions → Release BoxCop → Run workflow**, on `main`. Leave the version blank to
+increment the patch number of the highest published version, or enter one.
+
+```sh
 gh workflow run release.yml --ref main
-# Or choose a version explicitly:
 gh workflow run release.yml --ref main -f version=0.2.0
 ```
 
-The app remains beta quality (`BOXCOP_CHANNEL=beta`). GitHub releases are published
-as normal/latest releases, rather than GitHub prereleases. Release preflight checks
-GitHub's permanent repository ID (`1434713741`) and the approved owner/name, then
-exports `BOXCOP_UPDATE_FEED_URL=https://getallay.ai/updates/appcast.xml` for the
-bundle builder. The signed appcast uses versioned Railway download routes. GitHub
-publication still uses the current repository owner. Publication rejects a bundle
-whose feed URL differs. Do not manually mark an unrelated release as latest.
+The workflow is manual only. It:
 
-Share `https://getallay.ai/download` for the latest installer. Railway resolves the
-latest published stable release within 60 seconds, using a backend-only read token
-for the private repository. The route is unlisted but public to anyone with its URL;
-it is not linked from the website. See [backend configuration](../team/DEPLOYMENT.md#private-repository-app-distribution).
-Deploy and configure that backend before publishing the first release with these
-URLs. Existing installations using GitHub feeds need a one-time manual upgrade;
-private GitHub URLs cannot redirect unauthenticated installed apps to the new feed.
-Only Apple silicon is currently published; Intel builds do not start update checks.
-Adding stable/beta feeds or Intel release assets requires explicit feed routing.
+1. Checks that every secret and variable below exists, and stops with their names
+   when any are missing. **They are not configured yet**, so the workflow stops
+   here today.
+2. Confirms it runs from `main` in `LIT-Protocol/boxcop` (repository ID
+   `1455881957`; forks have a different ID) and that the version is new.
+3. Refreshes the bundled threat list and fails if upstream is older than two days.
+4. Runs the Python tests, then `./build.sh` with temporary signing credentials.
+5. Runs the first-launch smoke test on the signed app.
+6. Generates and signs the appcast, then publishes `v<VERSION>` as a GitHub
+   release with the DMG, `appcast.xml`, debug symbols, `SHA256SUMS`,
+   `build-evidence.json`, the launch smoke log and the threat list manifest.
 
-Existing users manually install the first updater-enabled DMG. Subsequent releases
-are offered through Sparkle's standard **Install and Relaunch** flow. Automatic
-checks are on by default and can be disabled in the menu bar; automatic installation
-is disabled. The app's normal termination handler drains the sidecar before exit.
-On launch, only an already-enabled older network extension is submitted for
-replacement. macOS may still require approval or reboot; Connections shows its
-status and provides manual retry. User data remains outside the replaced app bundle.
+Tags and releases are never overwritten, and versions must increase.
 
-## Repository identity
+### Required secrets
 
-The organization was renamed from `Ember-Sovereignty` to `boxcophq`. Release preflight
-accepts both names only with the original repository ID `1434713741`; forks cannot
-pass that check. New builds use the owner-independent Railway feed. Preserve the
-Sparkle key, bundle IDs and versioned release assets. GitHub redirects do not grant
-access to private releases; old installed apps need the manual migration above.
+Settings → Secrets and variables → Actions → Secrets:
 
-## Signing and version identity
+| Secret | Value |
+| --- | --- |
+| `BOXCOP_CERTIFICATE_BASE64` | Base64 of the password-protected PKCS#12 export of the Developer ID Application certificate and its private key |
+| `BOXCOP_CERTIFICATE_PASSWORD` | That export's password |
+| `BOXCOP_APP_PROFILE_BASE64` | Base64 of the app provisioning profile |
+| `BOXCOP_NETWORK_PROFILE_BASE64` | Base64 of the network extension provisioning profile |
+| `BOXCOP_NOTARY_APPLE_ID` | Apple ID used for notarization |
+| `BOXCOP_NOTARY_PASSWORD` | App-specific password for that Apple ID |
+| `BOXCOP_TEAM_ID` | The 10-character Apple team ID the certificate belongs to |
+| `BOXCOP_SIGNING_IDENTITY` | SHA-1 fingerprint of the Developer ID Application certificate |
+| `BOXCOP_SPARKLE_PRIVATE_KEY` | Base64 Ed25519 private key that signs updates, exported by Sparkle's `generate_keys` |
 
-The existing Apple signing/notarization secrets remain required. Additionally,
-`BOXCOP_SPARKLE_PRIVATE_KEY` is a repository Actions secret containing the base64
-Ed25519 seed exported by Sparkle's `generate_keys`. Its public key is pinned as
-`SUPublicEDKey` in `desktop/macos/Resources/Info.plist`. Both the update archive and
-feed are signed, and `SURequireSignedFeed` is enabled. Publication verifies that the
-secret matches the bundled public key and verifies the generated signatures.
-Never regenerate or replace this key casually: installed apps trust the original.
-The initial key is backed up in the maintainer's login Keychain under Sparkle
-account `boxcop-updates`. Temporary private-key exports must not enter the repository.
+### Required variables
 
-`BOXCOP_VERSION` sets the display version. The increasing Unix-timestamp build
-number is shared by the app and network extension, preserving compatibility with
-existing local distribution builds. Sparkle is pinned to 2.10.1 in Package.swift
-and Package.resolved; its checksum-verified SPM artifact supplies both the embedded
-framework and release tools. The build seals nested helpers before the framework
-and app. Unneeded sandbox XPC services are removed.
+Settings → Secrets and variables → Actions → Variables:
 
-## Failed runs and validation limits
+| Variable | Value |
+| --- | --- |
+| `BOXCOP_UPDATE_FEED_URL` | The appcast URL. Required: a published release that names no feed could never update itself. |
+| `BOXCOP_UPDATE_PUBLIC_KEY` | The public half of `BOXCOP_SPARKLE_PRIVATE_KEY` |
 
-Failures before publication leave no public release. If uploading succeeds but
-publishing fails, the draft and tag may remain; inspect and deliberately remove
-that incomplete draft/tag before retrying the same version, or choose a new version.
-Never overwrite a published version. Each feed contains the newest full update;
-older installers remain available through their versioned Railway routes.
+Optional: `BOXCOP_PACKAGE_FEED_URL`, `BOXCOP_PACKAGE_FEED_PUBLIC_KEY_BASE64` and
+`BOXCOP_PACKAGE_FEED_MINIMUM_SEQUENCE` override the default package feed.
 
-CI covers release preflight, signature integrity, native compilation and tests,
-Sparkle startup in the signed app, notarization, Gatekeeper, and launch. The
-`--check-updater-startup` command exits before Sparkle's scheduled update cycle
-runs; startup errors fail the build before notarization or publication. An actual old-to-new install/relaunch and
-macOS extension replacement still require interactive acceptance on a real Mac.
+[ci-signing.md](ci-signing.md) explains how the workflow handles the signing
+secrets.
 
-The initial updater configuration enabled `SURequireSignedFeed` without its
-required `SUVerifyUpdateBeforeExtraction` setting. Affected builds (including
-v0.1.0) cannot start Sparkle and must be replaced manually with a fixed release.
-Both settings must remain enabled. To run the native regression that checks both
-the broken and corrected configurations in separately signed temporary bundles:
+### The update signing key
+
+Installed apps trust the public key they were built with. Generate the key pair
+once, keep the private key in the repository secret and in one offline backup,
+and never replace it casually: an app built with the old public key rejects
+updates signed with a new one. Publication verifies that the secret matches the
+public key in the bundle before it signs anything.
+
+### Failed runs
+
+A failure before publication leaves no release. If asset upload succeeds and
+publishing fails, a draft release and tag can remain. Inspect and remove that
+draft and tag before retrying the same version, or choose a new version. Never
+overwrite a published version.
+
+## What a build proves
+
+`build-evidence.json` records the source commit, profile, channel, signing and
+notarization result, the package and update feeds, and the checks that ran. A
+passing build proves packaging, signatures, the engine self-test and first launch.
+It does not prove that a layer protects anything: the network extension, package
+routing and agent hooks are accepted interactively in the
+[VM lab](vm-lab.md).
+
+To run the updater regression against a freshly built executable:
 
 ```sh
 swift build --package-path desktop/macos --product BoxCop

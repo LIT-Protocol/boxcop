@@ -63,33 +63,9 @@ struct SoftwareInventoryReport: Decodable {
 }
 
 enum SoftwareInventory {
-    /// Dedicated child uses the bundled engine, not the paste decision pipe. Output
-    /// and runtime are bounded; inspected binaries are never started.
+    /// A dedicated engine run. Output and runtime are bounded; inspected binaries are never started.
     static func scan(roots: [String] = [], cache: Bool = false) -> Data? {
-        let process = Process(), pipe = Pipe()
-        process.executableURL = Bundle.main.bundleURL.appendingPathComponent("Contents/Resources/engine/boxcop-engine")
-        process.arguments = ["--software-inventory"] + (cache ? ["--cache"] : []) + roots.flatMap { ["--root", $0] }
-        process.environment = EngineConfiguration.cleanEnvironment(ProcessInfo.processInfo.environment)
-        process.standardInput = FileHandle.nullDevice
-        process.standardError = FileHandle.nullDevice
-        process.standardOutput = pipe
-        do { try process.run() } catch { return nil }
-        let pid = process.processIdentifier
-        let timeout = DispatchWorkItem { if process.isRunning { kill(pid, SIGKILL) } }
-        DispatchQueue.global().asyncAfter(deadline: .now() + 15, execute: timeout)
-        defer { timeout.cancel(); try? pipe.fileHandleForReading.close() }
-        var output = Data()
-        while true {
-            let bytes: Data
-            do { bytes = try pipe.fileHandleForReading.read(upToCount: 65536) ?? Data() }
-            catch { process.terminate(); return nil }
-            if bytes.isEmpty { break }
-            guard output.count + bytes.count <= 2 * 1024 * 1024 else { kill(pid, SIGKILL); return nil }
-            output.append(bytes)
-        }
-        process.waitUntilExit()
-        guard process.terminationStatus == 0 else { return nil }
-        return output
+        EngineTools.run(["--software-inventory"] + (cache ? ["--cache"] : []) + roots.flatMap { ["--root", $0] }, timeout: 15)
     }
     static func decode(_ bytes: Data) -> SoftwareInventoryReport? {
         let decoder = JSONDecoder(); decoder.keyDecodingStrategy = .convertFromSnakeCase
@@ -103,13 +79,16 @@ enum SoftwareInventory {
               let data = scan(roots: args.isEmpty ? [] : [args[1]]) else { print("Inventory unavailable"); exit(1) }
         FileHandle.standardOutput.write(data)
     }
-    static func refresh() async -> (SoftwareInventoryReport?, Data?) {
+    static func refresh() async -> SoftwareInventoryReport? {
         await withCheckedContinuation { continuation in
-            DispatchQueue.global(qos: .utility).async {
-                guard let data = scan(cache: true), let report = decode(data) else { continuation.resume(returning: (nil,nil)); return }
-                continuation.resume(returning: (report,data))
-            }
+            DispatchQueue.global(qos: .utility).async { continuation.resume(returning: scan(cache: true).flatMap(decode)) }
         }
+    }
+    /// The report the last check saved, so findings show before the first check of this launch finishes.
+    static var cacheURL: URL { EngineTools.dataDirectory.appendingPathComponent("software-inventory.json") }
+    static func cached() -> SoftwareInventoryReport? {
+        guard let data = try? Data(contentsOf: cacheURL), data.count <= 2 * 1024 * 1024 else { return nil }
+        return decode(data)
     }
 }
 #endif

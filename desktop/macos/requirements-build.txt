@@ -1,4 +1,4 @@
-# Pinned standalone policy-engine build dependencies.
+# Pinned build dependencies for the frozen BoxCop engine.
 # Wheel hashes from the version-specific PyPI JSON API; install --require-hashes --only-binary=:all:.
 # No web server, model runtime, or cloud SDK is bundled.
 annotated-types==0.8.0 \
@@ -169,6 +169,6 @@ packaging==25.0 \
 setuptools==80.9.0 \
     --hash=sha256:062d34222ad13e0cc312a4c02d73f059e86a4acbfbdea8f8f76b28c99f306922
 
-# HTTPS trust store for provider observations.
+# HTTPS trust store for feed and registry requests.
 certifi==2026.10.23 \
     --hash=sha256:e9b54de76e530bb6cf0ccd036787103acb58fd42ba930ea8bf948ddbaa2f61d1

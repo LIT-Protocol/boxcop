@@ -1,4 +1,8 @@
-"""Provisioned system-extension packaging. Never manufactures Apple approval."""
+"""Provisioned network-extension packaging. Never manufactures Apple approval.
+
+The bundle identifiers keep their original values because the Developer ID
+provisioning profiles BoxCop is signed with are bound to them.
+"""
 from datetime import datetime, timezone
 import hashlib
 from pathlib import Path
@@ -9,6 +13,10 @@ import subprocess
 
 APP_ID = 'local.sentinel.endpoint'
 NETWORK_ID = APP_ID + '.network-filter'
+EXECUTABLE = 'BoxCopNetworkFilter'
+# Must equal the @objc(...) name in Sources/BoxCopNetworkFilter/main.swift.
+PROVIDER_CLASS = 'BoxCopFilterDataProvider'
+USAGE = 'BoxCop records new outgoing connections from every app and blocks hosts on its threat list.'
 REQUIRED = {
     'app': {'com.apple.developer.system-extension.install': True,
             'com.apple.developer.networking.networkextension': ['content-filter-provider-systemextension']},
@@ -48,7 +56,7 @@ def validate_profile(profile, kind, identity, now=None):
 
 def load_profiles(paths, identity):
     if set(paths) != set(REQUIRED) or any(path is None for path in paths.values()):
-        raise ValueError('Protected builds require app and network Developer ID profiles')
+        raise ValueError('Distribution builds require app and network Developer ID profiles')
     result = {}
     for kind, path in paths.items():
         path = Path(path)
@@ -69,26 +77,26 @@ def load_profiles(paths, identity):
 def embed(bundle, native, network, profiles, build_version):
     if not re.fullmatch(r'[1-9][0-9]*', str(build_version)):
         raise ValueError('An increasing positive extension build version is required')
-    destinations = {'app': bundle}
-    for kind, executable in [('network', network)]:
-        identifier = IDENTIFIERS[kind]
-        destination = bundle / 'Contents/Library/SystemExtensions' / (identifier + '.systemextension')
-        (destination / 'Contents/MacOS').mkdir(parents=True)
-        name = 'BoxCopNetworkFilter'
-        shutil.copy2(executable, destination / 'Contents/MacOS' / name)
-        shutil.copytree(Path(__file__).resolve().parents[1] / 'Resources/ThreatDomains',
-                        destination / 'Contents/Resources/ThreatDomains')
-        info = {'CFBundleIdentifier': identifier, 'CFBundleName': 'BoxCop Network Filter',
-                'CFBundleExecutable': name, 'CFBundlePackageType': 'SYSX', 'CFBundleVersion': str(build_version),
-                'CFBundleShortVersionString': '0.1', 'LSMinimumSystemVersion': '14.0', 'BoxCopNetworkMode': 'standalone',
-                'NSSystemExtensionUsageDescription': 'BoxCop logs outgoing connections from all apps and blocks listed threat domains.'}
-        if kind == 'network':
-            info['NetworkExtension'] = {'NEProviderClasses': {'com.apple.networkextension.filter-data': 'BoxCopFilterDataProvider'}}
-        (destination / 'Contents/Info.plist').write_bytes(plistlib.dumps(info))
-        destinations[kind] = destination
     app_info = bundle / 'Contents/Info.plist'
     info = plistlib.loads(app_info.read_bytes())
-    info['NSSystemExtensionUsageDescription'] = 'BoxCop logs outgoing connections from all apps and blocks listed threat domains.'
+    destination = bundle / 'Contents/Library/SystemExtensions' / (NETWORK_ID + '.systemextension')
+    (destination / 'Contents/MacOS').mkdir(parents=True)
+    shutil.copy2(network, destination / 'Contents/MacOS' / EXECUTABLE)
+    # The extension reads its threat list from its own bundle, not from the app.
+    shutil.copytree(Path(__file__).resolve().parents[1] / 'Resources/ThreatDomains',
+                    destination / 'Contents/Resources/ThreatDomains')
+    extension_info = {
+        'CFBundleIdentifier': NETWORK_ID, 'CFBundleName': 'BoxCop Network Filter',
+        'CFBundleDisplayName': 'BoxCop Network Filter', 'CFBundleExecutable': EXECUTABLE,
+        'CFBundlePackageType': 'SYSX', 'CFBundleVersion': str(build_version),
+        'CFBundleShortVersionString': info.get('CFBundleShortVersionString', '0.1.0'),
+        'LSMinimumSystemVersion': '14.0',
+        'NSSystemExtensionUsageDescription': USAGE,
+        'NetworkExtension': {'NEProviderClasses': {'com.apple.networkextension.filter-data': PROVIDER_CLASS}},
+    }
+    (destination / 'Contents/Info.plist').write_bytes(plistlib.dumps(extension_info))
+    destinations = {'app': bundle, 'network': destination}
+    info['NSSystemExtensionUsageDescription'] = USAGE
     info['CFBundleVersion'] = str(build_version)
     app_info.write_bytes(plistlib.dumps(info))
     for kind, destination in destinations.items():

@@ -1,6 +1,7 @@
 # Daily security feed review
 
-Run this manually from your local checkout after the script's PR is merged to main:
+This workflow keeps the [machine health](software-exposure.md) advisories current.
+Run it manually from your local checkout:
 
 ```sh
 # One-time prerequisites: Python 3.12+, curl, Git, gh, and the Codex CLI.
@@ -59,25 +60,11 @@ off a feed. This is not a complete historical CVE corpus: pwn.watch currently
 returns its latest 50 entries. Cross-feed reports are assessed individually so
 neither source's context disappears.
 
-The initial ledger is a conservative implementation triage of 56 entries, not
-primary-source verification of every incident. It identifies existing advisory
-coverage, actionable gaps and platform limits. The Chrome follow-up baseline was
-independently verified against Google's release note and has inventory regressions.
-The [next twelve local advisory additions](../research/security-feed-dozen-coverage.md)
-and [second twelve additions](../research/security-feed-next-dozen-coverage.md)
-move 24 incident entries from gap to partial. The [remaining review](../research/security-feed-remaining-coverage.md)
-adds eight more local advisory slices and classifies seven appliance/kernel incidents
-outside local Mac scope. That 56-item snapshot had 41 partial, 13 out-of-scope
-and 2 unresolved entries. No row claims universal prevention; eliminating gap rows
-does not eliminate the documented enforcement and verification gaps.
-
-The [November 4 review](../research/security-feed-review-november.md) checks all 56
-currently fetched entries, including 24 unchanged ones. It retains 18 entries that
-rolled off, bringing the ledger to 74: 47 partial, 23 out-of-scope, 3 gaps and
-1 unresolved. It adds local advice for Chrome 157, Better Auth, FreeRDP and Node-RED
-and resolves the previous Tailscale/Headscale and TeamViewer source-verification
-gaps. Docker Sandboxes, NoMachine Web Player and Rails Active Storage still need
-component discovery work; Dameware target-platform applicability remains unresolved.
+The ledger was ported with the code. It is a conservative implementation triage,
+not primary-source verification of every incident. As of the November 4, 2026
+review it held 74 entries: 47 partial, 23 out of scope, 3 gaps and 1 unresolved.
+No row claims universal prevention, and removing a gap row does not remove the
+documented enforcement and verification limits.
 
 For a supported new check, the reviewer must verify primary sources, implement
 both matching and discovery where necessary, and test affected, fixed, unknown

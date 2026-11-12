@@ -20,7 +20,7 @@ def fixture(tmp_path, monkeypatch, *, refresh=None):
     provision(directory, sign(build_payload(list(datadog_records({'bad-fixture': ['1.0.0']}, 'npm')), 1,
                                           {'fixture': {'fetched_at': now()}}), key), public)
     monkeypatch.setattr('server.package_runtime.refresh', refresh or (lambda *_: None))
-    return PackageRuntime(home=tmp_path, directory=directory, channel=channel, port=0, migrate=lambda _: None)
+    return PackageRuntime(home=tmp_path, directory=directory, channel=channel, port=0)
 
 
 def idle(runtime):
@@ -83,7 +83,7 @@ def test_relaunch_restores_previously_enabled_routing(tmp_path, monkeypatch):
     assert idle(runtime)['active']
     runtime.close()
     restarted = PackageRuntime(home=tmp_path, directory=runtime.directory, channel=runtime.channel,
-                               port=0, migrate=lambda _: None)
+                               port=0)
     try:
         restarted.command('status')
         assert idle(restarted)['active']
@@ -101,25 +101,48 @@ def test_normal_status_does_not_enable_routing(tmp_path, monkeypatch):
         runtime.close()
 
 
-def test_migration_removes_only_the_legacy_job(tmp_path, monkeypatch):
-    import plistlib
-    from types import SimpleNamespace
-    from server.package_runtime import remove_legacy_agent
-    path = tmp_path / 'Library/LaunchAgents/com.boxcop.package-protection.plist'
-    path.parent.mkdir(parents=True)
-    path.write_bytes(plistlib.dumps({'Label': 'com.boxcop.package-protection',
-                                    'ProgramArguments': ['/Applications/BoxCop.app/engine', '--package-protection']}))
-    calls = []
-    def run(args, **kwargs):
-        calls.append(args)
-        assert kwargs['timeout'] == 10
-        return SimpleNamespace(returncode=0)
-    monkeypatch.setattr('server.package_runtime.subprocess.run', run)
-    remove_legacy_agent(tmp_path)
-    assert calls[0][1] == 'bootout'
-    assert not path.exists()
-    path.write_bytes(plistlib.dumps({'Label': 'another-job'}))
-    import pytest
-    with pytest.raises(ValueError, match='changed'):
-        remove_legacy_agent(tmp_path)
-    assert path.exists()
+def test_test_package_is_always_blocked_and_blocks_are_recorded(tmp_path, monkeypatch):
+    """`npm install boxcop-test-malware` is the install-gate check. The feed does not
+    list it and the upstream registry is never asked about it."""
+    import json
+    from server.security_events import firewall_events
+    runtime = fixture(tmp_path, monkeypatch)
+    try:
+        runtime.command('enable')
+        assert idle(runtime)['active']
+        def no_upstream(url):
+            raise AssertionError('upstream must not be contacted for the test package: ' + url)
+        monkeypatch.setattr(runtime.server.firewall.upstream, 'metadata', no_upstream)
+        base = f'http://127.0.0.1:{runtime.server.server_port}'
+        with httpx.Client(trust_env=False) as client:
+            for path in ('/npm/boxcop-test-malware', '/npm/boxcop-test-malware/1.2.3', '/pnpm/boxcop-test-malware',
+                         '/npm/boxcop-test-malware/-/boxcop-test-malware-9.9.9.tgz',
+                         '/pypi/simple/boxcop-test-malware/', '/pypi/simple/BoxCop_Test.Malware/'):
+                response = client.get(base + path)
+                assert response.status_code == 403, path
+                assert response.json()['error'] == 'BOXCOP_KNOWN_MALWARE'
+                assert response.json()['reports'][0]['id'] == 'BOXCOP-SELF-TEST'
+            # A listed release is recorded once however many times the client asks.
+            for _ in range(3):
+                assert client.get(base + '/npm/bad-fixture/1.0.0').status_code == 403
+            assert client.get(base + '/status').json()['blocked_requests'] == 9
+        rows = json.loads((runtime.directory / 'blocks.json').read_text())
+        assert [(row['ecosystem'], row['package'], row['version'], row['self_test'], row['count']) for row in rows] == [
+            ('npm', 'boxcop-test-malware', None, True, 4), ('PyPI', 'boxcop-test-malware', None, True, 2),
+            ('npm', 'bad-fixture', '1.0.0', False, 3)]
+        assert rows[-1]['sources'] == ['datadog']
+        events = firewall_events(runtime.directory, 50)
+        listed = next(event for event in events if event['package'] == 'bad-fixture')
+        assert listed['title'] == 'Blocked install of bad-fixture 1.0.0' and listed['subject'] == 'bad-fixture@1.0.0'
+        assert listed['layer'] == 'install_gate' and listed['outcome'] == 'blocked' and 'datadog' in listed['reason']
+        assert any(event['title'] == 'Blocked install of boxcop-test-malware' and 'test package' in event['reason']
+                   for event in events)
+    finally:
+        runtime.close()
+
+
+def test_similar_names_are_not_the_test_package(tmp_path, monkeypatch):
+    from server.package_proxy import self_test
+    assert self_test('npm', 'boxcop-test-malware') and self_test('PyPI', 'Boxcop.Test_Malware')
+    for name in ('boxcop-test-malware2', '@scope/boxcop-test-malware', 'boxcop-test', '../boxcop-test-malware'):
+        assert not self_test('npm', name)

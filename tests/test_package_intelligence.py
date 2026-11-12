@@ -1,3 +1,4 @@
+import base64
 import io
 import json
 import zipfile
@@ -215,16 +216,13 @@ def test_local_command_integration_and_ecosystem_separation(tmp_path, monkeypatc
     assert command_findings('npm install fresh-threat@1.0.0') == []
 
 
-def test_enrollment_pins_key_and_keeps_arguments_literal(tmp_path):
-    from tools.package_service import provision, service_plist
+def test_enrollment_pins_key(tmp_path):
+    from tools.package_service import provision
     key = Ed25519PrivateKey.generate()
     provision(tmp_path, sign(payload(), key), key.public_key().public_bytes_raw())
     other = Ed25519PrivateKey.generate()
     with pytest.raises(ValueError, match='Pinned key differs'):
         provision(tmp_path, sign(payload(sequence=2), other), other.public_key().public_bytes_raw())
-    config = service_plist('/Applications/BoxCop Test.app/engine', tmp_path)
-    assert config['ProgramArguments'][0] == '/Applications/BoxCop Test.app/engine'
-    assert config['KeepAlive'] and config['RunAtLoad']
 
 
 def test_failed_github_page_does_not_advance_cursor():
@@ -309,3 +307,15 @@ def test_publisher_failure_does_not_replace_snapshot_or_cursor(tmp_path, monkeyp
               '--output', str(tmp_path / 'policy'), '--sequence', '2'])
     assert (tmp_path / 'policy').read_bytes() == policy
     assert (tmp_path / 'github.json').read_text() == '{"cursor":"previous"}'
+
+
+def test_signed_feed_wire_strings_match_the_existing_publisher():
+    """BoxCop consumes the feed published at getallay.ai. Its payload schema and
+    signature domain are fixed by that publisher; renaming either breaks verification."""
+    from server import package_intelligence
+    assert package_intelligence.SCHEMA == 'allay.package-policy.v1'
+    assert package_intelligence.COMPRESSED_CONTEXT == b'allay.package-policy.zlib.v1\x00'
+    key = Ed25519PrivateKey.generate()
+    envelope = json.loads(sign(payload(), key))
+    key.public_key().verify(base64.b64decode(envelope['signature']),
+                            b'allay.package-policy.zlib.v1\x00' + base64.b64decode(envelope['payload']))

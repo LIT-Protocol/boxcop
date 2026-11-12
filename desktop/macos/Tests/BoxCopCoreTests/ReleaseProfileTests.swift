@@ -2,24 +2,22 @@ import XCTest
 @testable import BoxCopCore
 
 final class ReleaseProfileTests: XCTestCase {
-    func testPackagedBetaCannotEnablePrivilegedDevelopmentPaths() {
+    func testPackagedBuildsRejectDevelopmentNetworkFlags() {
         let profile = ReleaseProfile.resolve(bundleProfile: "beta", arguments: ["--production-mode"])
         XCTAssertEqual(profile, .limitedDevelopment)
-        XCTAssertFalse(profile.usesEndpointSecurity)
-        XCTAssertFalse(profile.automaticDevelopmentCollection)
-        for option in ["--dev-endpoint-security-probe", "--dev-endpoint-security-service", "--dev-endpoint-security-control", "--dev-network-filter-enable", "--dev-network-filter-disable", "--dev-agent-run", "--dev-es-lifecycle-test"] {
+        for option in ["--dev-network-filter-enable", "--dev-network-filter-disable"] {
             XCTAssertTrue(profile.rejects(arguments: ["BoxCop", option]), option)
         }
-        for option in ["--host-agent-hook", "--provider-integrations", "--collect-event", "--native-messaging", "--dev-visual-test"] {
+        for option in ["--host-agent-hook", "--status", "--dev-interface-preview", "--dev-software-inventory"] {
             XCTAssertFalse(profile.rejects(arguments: ["BoxCop", option]), option)
         }
     }
-    func testBetaDoesNotReuseDevelopmentConsent() {
-        XCTAssertNotEqual(ReleaseProfile.limitedDevelopment.consentKey, ReleaseProfile.development.consentKey)
+    func testResolutionFromArgumentsAndBundle() {
         XCTAssertEqual(ReleaseProfile.resolve(bundleProfile: nil, arguments: ["--limited-development-mode"]), .limitedDevelopment)
         XCTAssertEqual(ReleaseProfile.resolve(bundleProfile: nil, arguments: []), .development)
         XCTAssertEqual(ReleaseProfile.resolve(bundleProfile: nil, arguments: ["--production-mode"]), .productionPreview)
-        XCTAssertFalse(ReleaseProfile.development.rejects(arguments: ["--dev-endpoint-security-service"]))
+        XCTAssertFalse(ReleaseProfile.development.rejects(arguments: ["--dev-network-filter-enable"]))
+        XCTAssertFalse(ReleaseProfile.development.usesNetworkProtection)
     }
 }
 
@@ -30,19 +28,13 @@ final class DistributionChannelTests: XCTestCase {
             let profile = ReleaseProfile.resolve(bundleProfile: "distribution", arguments: ["--beta-mode", "--production-mode"])
             XCTAssertEqual(profile, .distribution)
             XCTAssertTrue(profile.usesNetworkProtection)
-            XCTAssertTrue(profile.usesStandaloneNetworkProtection)
-            XCTAssertTrue(profile.requiresMonitoringConsent)
-            XCTAssertFalse(profile.usesEndpointSecurity)
-            XCTAssertFalse(profile.automaticDevelopmentCollection)
+            XCTAssertTrue(profile.packaged)
             XCTAssertTrue(profile.rejects(arguments: ["--dev-network-filter-enable"]))
-            XCTAssertEqual(profile.consentKey, "beta-consent-choices-v1")
         }
     }
     func testLimitedDevelopmentCannotEnableNetworkWithFlags() {
         let profile = ReleaseProfile.resolve(bundleProfile: "limited-development", arguments: ["--production-mode"])
         XCTAssertFalse(profile.usesNetworkProtection)
-        XCTAssertFalse(profile.usesStandaloneNetworkProtection)
-        XCTAssertTrue(profile.requiresMonitoringConsent)
-        XCTAssertFalse(profile.automaticDevelopmentCollection)
+        XCTAssertTrue(profile.packaged)
     }
 }

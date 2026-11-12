@@ -1,4 +1,5 @@
 import Foundation
+import CoreGraphics
 
 public enum SettingsHelperPlacement {
     /// AppKit coordinates. Dialogs may precede the main window in front-to-back order.

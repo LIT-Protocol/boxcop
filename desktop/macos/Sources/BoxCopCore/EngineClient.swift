@@ -145,8 +145,9 @@ public final class EngineClient: @unchecked Sendable {
         process.executableURL = config.executableURL
         process.arguments = config.arguments + ["--data-dir", config.dataDirectory.path]
         process.environment = EngineConfiguration.cleanEnvironment(ProcessInfo.processInfo.environment)
-        // No inherited working directory or network listener is used by the protocol.
-        process.currentDirectoryURL = config.executableURL.deletingLastPathComponent()
+        // The bundled engine never inherits a working directory. A development override with
+        // interpreter arguments (for example `-m server.desktop`) runs from the caller's directory.
+        if config.arguments.isEmpty { process.currentDirectoryURL = config.executableURL.deletingLastPathComponent() }
         process.standardInput = input; process.standardOutput = output
         process.standardError = FileHandle.nullDevice // no raw traceback/diagnostic persistence or console echo
         let exit = ChildExit()

@@ -72,31 +72,8 @@ public enum HostHookSupervisor {
         switch flag {
         case "--host-agent-hook": return ["claude", "codex", "cursor"]
         case "--host-agent-integrations": return ["auto", "install", "status", "remove"]
-        case "--host-agent-correction": return ["claude", "codex"]
-        case "--agent-corrections": return ["status", "enable", "disable", "send", "record"]
         default: return nil
         }
-    }
-
-    /// Advisory end-of-turn correction entry. Same deadline as the preflight, but it
-    /// fails open: any engine failure or unexpected output becomes `{}`. It can never
-    /// yield a PreToolUse denial and never writes a supervisor failure receipt.
-    public static func correction(executable: URL, arguments: [String], harness: String,
-                                  environment: [String: String], input: FileHandle = .standardInput,
-                                  timeout: TimeInterval = 3.5) -> Data {
-        run(executable: executable, arguments: arguments, harness: harness, environment: environment,
-            input: input, timeout: timeout, validate: validatedCorrection(_:harness:)) ?? Data("{}".utf8)
-    }
-
-    /// Exactly `{}`, a Stop continuation, or a person-visible notice; nothing else passes.
-    public static func validatedCorrection(_ bytes: Data, harness: String) -> Data? {
-        guard ["claude", "codex"].contains(harness), bytes.count <= 65536,
-              let object = try? JSONSerialization.jsonObject(with: bytes) as? [String: Any] else { return nil }
-        if object.isEmpty { return bytes }
-        if Set(object.keys) == ["decision", "reason"], object["decision"] as? String == "block",
-           let reason = object["reason"] as? String, !reason.isEmpty { return bytes }
-        if Set(object.keys) == ["systemMessage"], let message = object["systemMessage"] as? String, !message.isEmpty { return bytes }
-        return nil
     }
 
     public static func recordFailure(harness: String, directory: URL) {

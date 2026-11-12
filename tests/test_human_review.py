@@ -146,70 +146,26 @@ def test_hook_enforces_review_before_actual_effect(tmp_path, executable, argumen
     assert witness.read_text() == 'delivered'
 
 
-def managed_team(directory, *, revision=1, external=True):
-    from server.team.reporter import Enrollment, STATE_SCHEMA
-    local = Enrollment(directory)
-    with local.locked():
-        local.save({'schema': STATE_SCHEMA, 'mode': 'team', 'status': 'active',
-                    'organization': {'id': 'org-a', 'name': 'Test team'},
-                    'device': {'id': 'device-a'},
-                    'policy': {'revision': revision, 'settings': {},
-                               'review': {**DEFAULT_POLICIES, 'external': external}}})
-    return local
+def run_cli(directory, request, monkeypatch, capsys):
+    import io, sys
+    from server.human_review import main
+    monkeypatch.setattr(sys, 'stdin', type('S', (), {'buffer': io.BytesIO(json.dumps(request).encode())})())
+    code = main(['--data-dir', str(directory), '--executable', '/bin/false'])
+    return code, json.loads(capsys.readouterr().out)
 
 
-def test_team_rules_override_local_defaults_and_keep_offline(tmp_path):
-    from server.human_review import effective_policies
-    local = managed_team(tmp_path)
-    assert not gate(tmp_path, *action())[0]  # local default was off
-    with state(tmp_path) as value:
-        config, owner = effective_policies(tmp_path, value)
-        assert config['external'] and owner == 'Test team'
-        assert value['policies']['external'] is False
-    team = local.load(); team['status'] = 'revoked'; local.save(team)
+def test_configure_cli_saves_local_policies_and_expires_open_requests(tmp_path, monkeypatch, capsys):
+    enable(tmp_path)
     assert not gate(tmp_path, *action())[0]
-    local.remove()
-    assert gate(tmp_path, *action())[0]  # explicit leave restores personal choice
-
-
-def test_new_team_revision_invalidates_approved_action(tmp_path):
-    managed_team(tmp_path)
-    gate(tmp_path, *action())
-    resolve(tmp_path, pending(tmp_path)[0]['id'], True, lambda _: True)
-    managed_team(tmp_path, revision=2)
-    assert not gate(tmp_path, *action())[0]
-
-
-def test_team_change_during_authentication_prevents_old_approval(tmp_path):
-    managed_team(tmp_path)
-    gate(tmp_path, *action())
-    def reviewer(_):
-        managed_team(tmp_path, revision=2)
-        return True
-    with pytest.raises(ValueError):
-        resolve(tmp_path, pending(tmp_path)[0]['id'], True, reviewer)
-    assert not gate(tmp_path, *action())[0]
-
-
-def test_corrupt_team_state_never_falls_back_to_personal_allow(tmp_path):
-    from server.team.reporter import ReporterError
-    local = managed_team(tmp_path)
-    local.state_path.write_text('{broken')
-    with pytest.raises(ReporterError): gate(tmp_path, *action())
-
-
-def test_managed_config_cannot_be_changed_by_local_cli(tmp_path):
-    import subprocess
-    import sys
-    from pathlib import Path
-    managed_team(tmp_path)
-    entry = Path(__file__).resolve().parents[1] / 'desktop/macos/scripts/engine_entry.py'
-    result = subprocess.run([sys.executable, '-I', '-B', str(entry), '--human-review', '--data-dir', str(tmp_path),
-                             '--executable', '/unused'], input=json.dumps({'op': 'configure', 'policies': DEFAULT_POLICIES}),
-                            text=True, capture_output=True)
-    assert result.returncode == 1
-    assert not json.loads(result.stdout)['ok']
-    assert not gate(tmp_path, *action())[0]
+    policies = {**DEFAULT_POLICIES, 'external': True, 'spending': True}
+    code, result = run_cli(tmp_path, {'op': 'configure', 'policies': policies}, monkeypatch, capsys)
+    assert code == 0 and result['ok'] and result['policies'] == policies
+    assert 'managed_by' not in result and 'team_binding' not in result
+    assert [row['status'] for row in result['requests']] == ['expired']
+    code, result = run_cli(tmp_path, {'op': 'configure', 'policies': {**policies, 'currency': 'eur'}}, monkeypatch, capsys)
+    assert code == 1 and not result['ok']
+    code, result = run_cli(tmp_path, {'op': 'status'}, monkeypatch, capsys)
+    assert result['policies'] == policies
 
 
 class FakeRuntime:
@@ -279,13 +235,7 @@ def test_status_cli_reports_summaries(tmp_path, capsys, monkeypatch):
     'shred temporary.txt', 'git clean -fd', 'git reset --hard',
     'sqlite3 app.db "DROP TABLE users"',
 ])
-@pytest.mark.parametrize('managed', [False, True])
-def test_legacy_destructive_policy_does_not_hold_or_create_requests(tmp_path, command, managed):
+def test_retired_destructive_setting_does_not_hold_or_create_requests(tmp_path, command):
     enable(tmp_path, destructive=True)
-    if managed:
-        local = managed_team(tmp_path)
-        team = local.load()
-        team['policy']['review']['destructive'] = True
-        local.save(team)
     assert gate(tmp_path, *action(command))[0]
     assert not pending(tmp_path)

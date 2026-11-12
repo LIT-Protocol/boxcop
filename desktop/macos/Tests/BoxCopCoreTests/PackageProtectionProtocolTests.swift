@@ -15,7 +15,7 @@ final class PackageProtectionProtocolTests: XCTestCase {
         XCTAssertFalse(status.busy)
     }
     func testExplicitPackageListenerCanCoexistWithPipeEngine() throws {
-        let reply = #"{"version":1,"id":"p1","ok":true,"result":{"ready":true,"protocol":1,"engine":"rules+sequence","monitoring":false,"network_listener":true,"package_registry_listener":true}}"#
+        let reply = #"{"version":1,"id":"p1","ok":true,"result":{"ready":true,"protocol":1,"engine":"rules","network_listener":true,"package_registry_listener":true}}"#
         XCTAssertNotNil(try WireCodec.decode(Data(reply.utf8)).result)
     }
     func testInstallScriptCommandsBlockedConnectionsAndListener() throws {
@@ -34,9 +34,9 @@ final class PackageProtectionProtocolTests: XCTestCase {
         XCTAssertEqual(result.blocked.first?.host, "collector.example")
         XCTAssertNil(result.blocked.first?.agent)
         XCTAssertEqual(result.exceptions, [ScriptDestinationException(package: "electron", host: "github.com")])
-        let listener = #"{"version":1,"id":"p1","ok":true,"result":{"ready":true,"protocol":1,"engine":"rules+sequence","monitoring":false,"network_listener":true,"install_script_listener":true}}"#
+        let listener = #"{"version":1,"id":"p1","ok":true,"result":{"ready":true,"protocol":1,"engine":"rules","network_listener":true,"install_script_listener":true}}"#
         XCTAssertNotNil(try WireCodec.decode(Data(listener.utf8)).result)
-        let undeclared = #"{"version":1,"id":"p1","ok":true,"result":{"ready":true,"protocol":1,"engine":"rules+sequence","monitoring":false,"network_listener":true}}"#
+        let undeclared = #"{"version":1,"id":"p1","ok":true,"result":{"ready":true,"protocol":1,"engine":"rules","network_listener":true}}"#
         XCTAssertThrowsError(try WireCodec.decode(Data(undeclared.utf8)))
     }
 }

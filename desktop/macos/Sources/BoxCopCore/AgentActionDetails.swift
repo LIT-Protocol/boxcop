@@ -102,7 +102,7 @@ public struct AgentActionDetails: Equatable, Sendable {
     }
 }
 
-/// Fixed notification copy. Command text, folders and agent descriptions are never included.
+/// Approval notification copy. Command text, folders and agent descriptions are never included.
 public enum AgentApprovalCopy {
     public static let notificationPrefix = "boxcop-approval-"
     public static func notificationIdentifier(_ id: String) -> String { notificationPrefix + id }
@@ -115,6 +115,6 @@ public enum AgentApprovalCopy {
     public static func body(reasons: [String]) -> String {
         let labels = reasons.map(AgentActionDetails.reasonLabel)
         let lead = labels.isEmpty ? "An agent action" : labels.joined(separator: ", ")
-        return "\(lead) was held for review. Open Approvals in BoxCop to approve or reject it."
+        return "\(lead) was held for review. Open BoxCop to approve or reject it."
     }
 }

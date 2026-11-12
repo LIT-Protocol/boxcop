@@ -1,11 +1,9 @@
-"""Aggregate model attempts only: no content, hashes, categories or exception text."""
+"""Aggregate local-model attempts only: no content, hashes, categories or exception text."""
 from threading import Lock
 
 
-MINILM_BACKEND = 'minilm-head-v1'
 QWEN_BACKEND = 'qwen3.5-4b-workflow-v2'
-LEGACY_BACKENDS = ('qwen3.5-4b-review-v1',)
-BACKENDS = (MINILM_BACKEND, QWEN_BACKEND)
+BACKENDS = (QWEN_BACKEND,)
 OUTCOMES = ('ready', 'uncertain', 'unsupported', 'unavailable', 'error')
 COUNTERS = ('attempts', *OUTCOMES)
 
@@ -33,7 +31,7 @@ class ClassifierUsage:
         with self._lock:
             self._counts[backend][counter] += 1
             persist = self._persistence_ok
-        # Never hold the status/cache lock across disk I/O. A telemetry failure
+        # Never hold the status lock across disk I/O. A telemetry failure
         # must not kill the worker or change a policy decision.
         if persist:
             try:

@@ -21,13 +21,13 @@ from test_host_agents import call, layout
 def test_patterns_and_engine(tmp_path, text, policy):
     assert policy in {f['id'] for f in findings(text)}
     store = Store(tmp_path / 'audit.db')
-    record = Engine(store).evaluate(EventInput(session_id='test', actor='agent', role='engineering',
+    record = Engine(store).evaluate(EventInput(session_id='test',
         action='read', app='cursor', content=text))
     assert record.decision.action == 'block'
     assert policy in record.decision.policy_ids
     assert text not in json.dumps(record.model_dump())
     store.set_policy(policy, False)
-    assert policy not in Engine(store).evaluate(EventInput(session_id='test', actor='agent', role='engineering',
+    assert policy not in Engine(store).evaluate(EventInput(session_id='test',
         action='read', app='cursor', content=text)).decision.policy_ids
 
 
@@ -112,10 +112,10 @@ def test_total_bytes_are_bounded(tmp_path, monkeypatch):
     assert 'byte_limit' in scan(tmp_path)['errors']
 
 
-def test_human_prose_is_not_agent_instruction(tmp_path):
-    record = Engine(Store(tmp_path / 'audit.db')).evaluate(EventInput(session_id='test', actor='human',
-        role='engineering', action='paste', app='editor', destination='local',
-        content='Ignore previous instructions'))
+def test_command_text_is_not_checked_as_agent_instructions(tmp_path):
+    record = Engine(Store(tmp_path / 'audit.db')).evaluate(EventInput(session_id='test',
+        action='command', app='claude', destination='local-shell',
+        content='echo "Ignore previous instructions"'))
     assert 'skill-instruction-override' not in record.decision.policy_ids
 
 

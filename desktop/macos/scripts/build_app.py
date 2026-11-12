@@ -1,6 +1,8 @@
 #!/usr/bin/env python3
 """Build a real macOS-only application; Linux tests exercise guards, not signing."""
 import argparse
+import ast
+import base64
 from datetime import datetime, timezone
 import json
 import os
@@ -13,6 +15,7 @@ import subprocess
 import sys
 import tempfile
 import time
+from urllib.parse import urlsplit
 import venv
 
 MAC = Path(__file__).resolve().parents[1]
@@ -78,7 +81,7 @@ def validate_bundle_layout(bundle):
 
 
 def run(command, *, cwd=ROOT, env=None, timeout=600):
-    # Commands contain build paths only, never live clipboard content.
+    # Commands contain build paths only, never user data.
     print("+", " ".join(map(str, command)), flush=True)
     arguments = list(map(str, command))
     # Apple's timestamp service can fail transiently. Retry the same mandatory
@@ -94,33 +97,138 @@ def run(command, *, cwd=ROOT, env=None, timeout=600):
             time.sleep(2 ** attempt)
 
 
-def prepare_classifier(python, work, env):
-    """Every profile includes the verified model; a fresh checkout is sufficient."""
-    run([python, "-m", "pip", "install", "--require-hashes", "--only-binary=:all:",
-         "-r", MAC / "requirements-classifier.txt"], env=env)
-    model_dir = work / "models" / "minilm"
-    # Setup is the only model download path. It bounds and verifies all artifacts
-    # before publishing them. Never silently depend on a gitignored .local tree.
-    run([python, ROOT / "scripts/setup_model.py", "--model-dir", model_dir], env=env)
-    return ["--add-data", str(ROOT / "server/assets") + ":server/assets",
-            "--collect-all", "onnxruntime", "--collect-all", "tokenizers",
-            "--add-data", str(model_dir) + ":models/minilm"]
+# Import name -> pinned distribution name, where the two differ.
+DISTRIBUTIONS = {"yaml": "pyyaml", "semantic_version": "semantic-version", "pydantic_core": "pydantic-core"}
+ENTRY_MODULE = "server.desktop"
+
+
+def pinned_distributions(mac=MAC):
+    """Distributions the build installs from its hash-locked requirement files."""
+    names = set()
+    for filename in ("requirements-build.txt", "requirements-packages.txt"):
+        for line in (mac / filename).read_text().splitlines():
+            match = re.match(r"([A-Za-z0-9][A-Za-z0-9._-]*)==", line)
+            if match:
+                names.add(re.sub(r"[-_.]+", "-", match.group(1)).lower())
+    return names
+
+
+def _module_file(root, name):
+    """The source file of a checkout module, its directory for a namespace package, or None."""
+    if not name:
+        return None
+    base = root.joinpath(*name.split("."))
+    for candidate in (base.with_suffix(".py"), base / "__init__.py"):
+        if candidate.is_file():
+            return candidate
+    return base if base.is_dir() and any(base.glob("*.py")) else None
+
+
+def _imports(tree):
+    """Yield (level, module, names, optional) for every import, including lazy ones."""
+    def visit(node, optional):
+        if isinstance(node, ast.Import):
+            for alias in node.names:
+                yield 0, alias.name, [], optional
+        elif isinstance(node, ast.ImportFrom):
+            yield node.level, node.module or "", [alias.name for alias in node.names], optional
+        elif isinstance(node, ast.Try):
+            caught = {name.id for handler in node.handlers for name in ast.walk(handler.type or ast.Name("BaseException"))
+                      if isinstance(name, ast.Name)}
+            guarded = optional or bool(caught & {"ImportError", "ModuleNotFoundError", "Exception", "BaseException"})
+            for child in node.body:
+                yield from visit(child, guarded)
+            for child in (*node.handlers, *node.orelse, *node.finalbody):
+                yield from visit(child, optional)
+        else:
+            for child in ast.iter_child_nodes(node):
+                yield from visit(child, optional)
+    yield from visit(tree, False)
+
+
+def engine_imports(root=None, entry=ENTRY_MODULE):
+    """Follow the engine's own imports from its entry module.
+
+    Returns (local modules, required third-party modules, optional third-party modules).
+    Optional means the import sits in a try block that handles ImportError.
+    """
+    root = ROOT if root is None else Path(root)
+    local, required, optional = set(), set(), set()
+    queue = [entry]
+    while queue:
+        name = queue.pop()
+        if name in local:
+            continue
+        path = _module_file(root, name)
+        if path is None:
+            raise BuildError(f"Engine module not found: {name}")
+        local.add(name)
+        if path.is_dir():
+            continue
+        package = name if path.name == "__init__.py" else name.rpartition(".")[0]
+        for level, module, names, guarded in _imports(ast.parse(path.read_text(), filename=str(path))):
+            if level:
+                parts = package.split(".") if package else []
+                parts = parts[:len(parts) - (level - 1)]
+                module = ".".join(parts + ([module] if module else []))
+            top = module.split(".")[0]
+            if _module_file(root, top) is None:
+                if top and top not in sys.stdlib_module_names and top != "__future__":
+                    (optional if guarded else required).add(top)
+                continue
+            # `from package import name` may name a submodule or an attribute.
+            targets = [module] + [module + "." + item for item in names]
+            for target in targets:
+                if _module_file(root, target) is not None:
+                    # Importing a.b.c also imports a and a.b.
+                    pieces = target.split(".")
+                    queue.extend(".".join(pieces[:index]) for index in range(1, len(pieces) + 1))
+    return local, required, optional - required
+
+
+def engine_freeze_options(root=None, mac=MAC):
+    """PyInstaller options derived from what the engine imports.
+
+    Fails when the engine imports a third-party module that no hash-locked
+    requirement file installs: such a build would pass here and crash on a user's Mac.
+    """
+    root = ROOT if root is None else Path(root)
+    local, required, optional = engine_imports(root)
+    pinned = pinned_distributions(mac)
+    def distribution(module):
+        return re.sub(r"[-_.]+", "-", DISTRIBUTIONS.get(module, module)).lower()
+    missing = sorted(module for module in required if distribution(module) not in pinned)
+    if missing:
+        raise BuildError("The engine imports modules that are not pinned in requirements-build.txt or "
+                         "requirements-packages.txt: " + ", ".join(missing))
+    options = ["--add-data", str(root / "server/assets") + ":server/assets"]
+    files = {name for name in local if _module_file(root, name).is_file()}
+    for module in sorted(files | required | {name for name in optional if distribution(name) in pinned}):
+        options += ["--hidden-import", module]
+    return options
 
 
 def prepare_package_channel(work):
-    """Embed only a public trust pin. Missing configuration keeps activation off."""
+    """Embed only a public trust pin. Missing configuration keeps activation off.
+
+    BoxCop has no feed of its own yet. build.sh points these variables at the
+    existing signed Allay feed; see docs/package-registry-firewall.md.
+    """
     import importlib.util
     spec = importlib.util.spec_from_file_location('boxcop_package_channel', ROOT / 'server/package_channel.py')
     module = importlib.util.module_from_spec(spec)
     spec.loader.exec_module(module)
-    url = os.environ.get('BOXCOP_PACKAGE_FEED_URL')
-    public = os.environ.get('BOXCOP_PACKAGE_FEED_PUBLIC_KEY_BASE64')
+    url = os.environ.get('BOXCOP_PACKAGE_FEED_URL') or None
+    public = os.environ.get('BOXCOP_PACKAGE_FEED_PUBLIC_KEY_BASE64') or None
     if not url and not public:
         return []
     if not url or not public:
         raise BuildError('Package feed URL and public key must be configured together')
-    value = module.validate_channel(dict(schema='boxcop.package-channel.v1', url=url, public_key=public,
-        minimum_sequence=int(os.environ.get('BOXCOP_PACKAGE_FEED_MINIMUM_SEQUENCE', '1'))))
+    try:
+        value = module.validate_channel(dict(schema='boxcop.package-channel.v1', url=url, public_key=public,
+            minimum_sequence=int(os.environ.get('BOXCOP_PACKAGE_FEED_MINIMUM_SEQUENCE') or '1')))
+    except (ValueError, KeyError) as exc:
+        raise BuildError('Invalid package feed configuration: ' + str(exc)) from exc
     path = work / 'channel.json'
     path.write_text(json.dumps(value))
     return ['--add-data', str(path) + ':server/assets/package-intelligence']
@@ -169,19 +277,61 @@ def release_version(source=None):
     return value
 
 
+def validate_update_feed(feed, key):
+    """An update feed is an HTTPS URL plus the Ed25519 public key that signs it."""
+    url = urlsplit(feed)
+    if (feed != feed.strip() or any(character.isspace() for character in feed) or url.scheme != 'https'
+            or not url.hostname or url.username or url.password or url.query or url.fragment
+            or not url.path.endswith('.xml')):
+        raise BuildError('BOXCOP_UPDATE_FEED_URL must be a credential-free HTTPS URL of an appcast .xml file')
+    try:
+        decoded = base64.b64decode(key, validate=True)
+    except ValueError:
+        decoded = b''
+    if len(decoded) != 32:
+        raise BuildError('BOXCOP_UPDATE_PUBLIC_KEY must be a base64 Ed25519 public key')
+
+
 def release_metadata(source=None):
+    """Version and update settings supplied by the release, never baked into the checkout.
+
+    BoxCop has no update feed yet. A build gets SUFeedURL and SUPublicEDKey only
+    when both variables are set; without them the app does not start its updater.
+    """
     source = os.environ if source is None else source
     metadata = {}
     version = release_version(source)
     if version:
         metadata['CFBundleShortVersionString'] = version
-    feed = source.get('BOXCOP_UPDATE_FEED_URL')
-    if feed is not None:
-        allowed = {'https://getallay.ai/updates/appcast.xml'}
-        if feed not in allowed:
-            raise BuildError('BOXCOP_UPDATE_FEED_URL must be an approved BoxCop release feed')
+    feed = source.get('BOXCOP_UPDATE_FEED_URL') or None
+    key = source.get('BOXCOP_UPDATE_PUBLIC_KEY') or None
+    if feed or key:
+        if not feed or not key:
+            raise BuildError('BOXCOP_UPDATE_FEED_URL and BOXCOP_UPDATE_PUBLIC_KEY must be set together')
+        validate_update_feed(feed, key)
         metadata['SUFeedURL'] = feed
+        metadata['SUPublicEDKey'] = key
     return metadata
+
+
+def check_updater_startup(output, feed_configured):
+    """The app's own report must agree with what the build put in the bundle."""
+    if feed_configured and output != "UPDATER_STARTUP_PASS":
+        raise BuildError("Packaged Sparkle updater failed its startup check")
+    if not feed_configured and not output.startswith("UPDATER_STARTUP_SKIPPED"):
+        # A pass here would mean the app found a feed the build did not configure.
+        raise BuildError("Packaged app started an updater although the build has no update feed")
+
+
+def packaged_entrypoints_to_reject(sources=None):
+    """Lab-only command-line switches that still exist in the Swift sources.
+
+    Packaged builds must answer each with exit status 64. The list is read from
+    the sources so the check follows the app as lab switches are removed.
+    """
+    sources = MAC / "Sources" if sources is None else Path(sources)
+    text = "".join(path.read_text(errors="replace") for path in sorted(sources.rglob("*.swift")))
+    return sorted(set(re.findall(r'"(--dev-network-filter-[a-z-]+)"', text)))
 
 
 def verify_limited_development_bundle(bundle):
@@ -194,6 +344,7 @@ def verify_limited_development_bundle(bundle):
         result = subprocess.run(["/usr/bin/codesign", "-d", "--entitlements", ":-", str(path)],
                                 capture_output=True, check=True)
         entitlements = plistlib.loads(result.stdout) if result.stdout.strip() else {}
+        # BoxCop never requests the Endpoint Security entitlement; refuse it if it ever appears.
         forbidden = {"com.apple.developer.endpoint-security.client", "com.apple.developer.networking.networkextension",
                      "com.apple.developer.system-extension.install", "com.apple.security.get-task-allow"}
         if any(entitlements.get(key) for key in forbidden):
@@ -288,7 +439,6 @@ def build(output, *, host_system=None, signing_identity="-", profile="distributi
     if channel not in {"beta", "stable"}:
         raise BuildError("Release channel must be beta or stable")
     metadata = release_metadata()
-    version = metadata.get('CFBundleShortVersionString')
     if notary_profile and (profile != "distribution" or signing_identity == "-"):
         raise BuildError("Notarization requires a distribution profile and a Developer ID signing identity")
     profiles = None
@@ -300,6 +450,8 @@ def build(output, *, host_system=None, signing_identity="-", profile="distributi
             profiles = load_profiles(protection_profiles or {}, signing_identity)
         except (ValueError, subprocess.SubprocessError, OSError) as exc:
             raise BuildError(str(exc)) from exc
+    # Fail on an unpinned engine dependency before any filesystem write.
+    freeze_options = engine_freeze_options()
     output = validate_output(output)
     if sys.version_info[:2] != (3, 12):
         raise BuildError("Use Python 3.12 to build the pinned standalone runtime")
@@ -323,12 +475,11 @@ def build(output, *, host_system=None, signing_identity="-", profile="distributi
     python = build_venv / "bin" / "python"
     run([python, "-m", "pip", "install", "--require-hashes", "--only-binary=:all:", "-r", MAC / "requirements-build.txt"], env=env)
     run([python, "-m", "pip", "install", "--require-hashes", "--only-binary=:all:", "-r", MAC / "requirements-dmg.txt"], env=env)
-    classifier_options = prepare_classifier(python, work, env)
     run([python, "-m", "pip", "install", "--require-hashes", "--only-binary=:all:",
          "-r", MAC / "requirements-packages.txt"], env=env)
     run([python, "-m", "PyInstaller", "--noconfirm", "--clean", "--onedir", "--name", "boxcop-engine", "--paths", ROOT,
          "--distpath", work / "frozen", "--workpath", work / "pyinstaller-work", "--specpath", work,
-         *classifier_options, *prepare_package_channel(work), MAC / "scripts" / "engine_entry.py"], env=env)
+         *freeze_options, *prepare_package_channel(work), MAC / "scripts" / "engine_entry.py"], env=env)
     run(["swift", "test", "--scratch-path", work / "swift"], cwd=MAC, env=env)
     run(["swift", "build", "--scratch-path", work / "swift", "-c", "release", "-Xswiftc", "-g", "--product", "BoxCop"], cwd=MAC, env=env)
     bin_path = subprocess.check_output(["swift", "build", "--scratch-path", str(work / "swift"), "-c", "release", "--show-bin-path"], cwd=MAC, env=env, text=True).strip()
@@ -350,10 +501,8 @@ def build(output, *, host_system=None, signing_identity="-", profile="distributi
     (contents / "Info.plist").write_bytes(plistlib.dumps(info))
     shutil.copy2(MAC / "Resources" / "BoxCop.icns", contents / "Resources" / "BoxCop.icns")
     shutil.copy2(MAC / "Resources" / "BoxCopMark.svg", contents / "Resources" / "BoxCopMark.svg")
-    shutil.copytree(ROOT / "adapters" / "browser-context", contents / "Resources" / "browser-context")
-    shutil.copy2(ROOT / "docs" / "getting-started.md", contents / "Resources" / "BoxCop Guide.md")
     shutil.copytree(work / "frozen" / "boxcop-engine", contents / "Resources" / "engine", symlinks=True)
-    from bundle_inference import bundle_runtime
+    from bundle_inference import bundle_runtime, REVISION as inference_revision
     bundle_runtime(contents / "Resources" / "inference", work, run)
     native, engine = validate_bundle_layout(staged)
     for binary in (native, engine):
@@ -374,13 +523,20 @@ def build(output, *, host_system=None, signing_identity="-", profile="distributi
             result = subprocess.run(["/usr/bin/codesign", "-d", "--entitlements", ":-", str(target)], capture_output=True, check=True)
             actual = plistlib.loads(result.stdout)
             if any(actual.get(key) != value for key, value in expected.items()) or actual.get("com.apple.developer.endpoint-security.client") or actual.get("com.apple.security.get-task-allow"):
-                raise BuildError("Protected signature entitlements do not match the network-only distribution contract")
+                raise BuildError("Signed entitlements do not match the network-extension distribution contract")
     # Exercise the signed inference runtime without downloading/loading any weights.
     run([contents / "Resources/inference/llama-server", "--version"], cwd=work, env=env, timeout=30)
     # Exercise the actual hardened/signed engine, not just its unsigned predecessor.
     run([python, MAC / "scripts" / "smoke_engine.py", "--engine", engine, "--scratch", work / "signed-smoke"], cwd=work, env=env, timeout=60)
-    package_status = json.loads(subprocess.check_output([str(engine), '--package-setup', 'status'], cwd=work, env=env, text=True, timeout=30))
-    if package_status.get('configured') != bool(os.environ.get('BOXCOP_PACKAGE_FEED_URL')):
+    # Ask the signed engine whether it carries the feed pin. A scratch home keeps the
+    # build from reading the builder's own BoxCop state.
+    status_home = work / "status-home"
+    status_home.mkdir(mode=0o700)
+    package_status = json.loads(subprocess.check_output(
+        [str(engine), "--protection-status", "--data-dir", str(status_home / "data")],
+        cwd=work, env=dict(env, HOME=str(status_home)), text=True, timeout=30))
+    package_feed = bool(os.environ.get('BOXCOP_PACKAGE_FEED_URL'))
+    if package_status.get("package", {}).get("configured") is not package_feed:
         raise BuildError('Bundled package feed trust configuration did not survive freezing/signing')
     observed_profile = subprocess.check_output([str(native), "--release-profile"], cwd=work, env=env, text=True, timeout=10).strip()
     if observed_profile != profile:
@@ -390,14 +546,16 @@ def build(output, *, host_system=None, signing_identity="-", profile="distributi
         raise BuildError("Packaged release channel does not match requested channel")
     # A GUI can stay alive with a fatal Sparkle configuration alert. Exercise the
     # actual signed bundle's updater startup without entering the GUI run loop.
+    # With an update feed the app must start real Sparkle and report a pass.
+    # Without one it must exit 0 without starting the updater.
     updater_startup = subprocess.check_output([str(native), "--check-updater-startup"], cwd=work, env=env, text=True, timeout=10).strip()
-    if updater_startup != "UPDATER_STARTUP_PASS":
-        raise BuildError("Packaged Sparkle updater failed its startup check")
+    update_feed = info.get("SUFeedURL")
+    check_updater_startup(updater_startup, bool(update_feed))
     if profile in {"limited-development", "distribution"}:
-        for option in ("--dev-endpoint-security-probe", "--dev-endpoint-security-service", "--dev-network-filter-enable", "--dev-agent-run"):
+        for option in packaged_entrypoints_to_reject():
             denied = subprocess.run([str(native), option], cwd=work, env=env, capture_output=True, timeout=10)
             if denied.returncode != 64:
-                raise BuildError("Packaged build did not reject privileged entrypoint: " + option)
+                raise BuildError("Packaged build did not reject lab entrypoint: " + option)
     notary_id = notarize(staged, work, notary_profile) if notary_profile else None
     image = create_dmg(staged, work, python, signing_identity)
     dmg_notary_id = notarize(image, work, notary_profile) if notary_profile else None
@@ -410,15 +568,26 @@ def build(output, *, host_system=None, signing_identity="-", profile="distributi
     run(["/usr/bin/codesign", "--verify", "--deep", "--strict", "--verbose=2", final])
     shutil.copy2(image, output / "BoxCop.dmg")
     shutil.copytree(symbols, output / "BoxCop.dSYM")
-    evidence = {"created_at": datetime.now(timezone.utc).isoformat(), "platform": "macOS", "architecture": platform.machine(),
-                "version": info["CFBundleShortVersionString"], "build_version": str(extension_version or info["CFBundleVersion"]),
-                "sparkle_version": "2.10.1", "updater_startup": "passed", "source_commit": subprocess.check_output(["git", "rev-parse", "HEAD"], cwd=ROOT, text=True).strip(),
-                "bundle": str(final), "package": str(output / "BoxCop.dmg"), "dmg_notary_submission_id": dmg_notary_id, "profile": profile, "channel": channel, "endpoint_security": "not_required_for_network_protection" if profile == "distribution" else ("excluded" if profile == "limited-development" else "development_optional"),
-                "notarization": "accepted_and_stapled" if notary_profile else "NOT_RUN", "notary_submission_id": notary_id,
-                "notarized_package": bool(notary_profile), "hardened_runtime": profile in {"limited-development", "distribution"} and signing_identity != "-", "signing": "ad-hoc; not notarized" if signing_identity == "-" else ("Developer ID signed; notarized" if notary_profile else "certificate-signed; not notarized"), "engine_subprocess_smoke": "passed",
-                "classifier_runtime_smoke": "passed_before_and_after_signing", "classifier_backend": "minilm-head-v1",
-                "bundled_inference": "llama.cpp 7071ba378afa96dcd69c41e1ec2b4912364dbee4; signed runtime smoke passed; weights downloaded on demand",
-                "swift_tests": "passed", "signature_verification": "passed", "native_interactive_acceptance": "NOT_RUN"}
+    hardened = profile in {"limited-development", "distribution"} and signing_identity != "-"
+    signing = "ad-hoc; not notarized" if signing_identity == "-" else (
+        "Developer ID signed; notarized" if notary_profile else "certificate-signed; not notarized")
+    evidence = {
+        "created_at": datetime.now(timezone.utc).isoformat(), "platform": "macOS", "architecture": platform.machine(),
+        "version": info["CFBundleShortVersionString"], "build_version": str(extension_version or info["CFBundleVersion"]),
+        "source_commit": subprocess.check_output(["git", "rev-parse", "HEAD"], cwd=ROOT, text=True).strip(),
+        "bundle": str(final), "package": str(output / "BoxCop.dmg"), "profile": profile, "channel": channel,
+        "network_extension": "embedded" if provisioned else "not_included",
+        "package_feed": os.environ["BOXCOP_PACKAGE_FEED_URL"] if package_feed else "not_configured",
+        "update_feed": update_feed or "not_configured",
+        "updater_startup": "passed" if update_feed else "passed_updater_disabled_without_feed",
+        "sparkle_version": "2.10.1",
+        "signing": signing, "hardened_runtime": hardened, "signature_verification": "passed",
+        "notarization": "accepted_and_stapled" if notary_profile else "NOT_RUN",
+        "notarized_package": bool(notary_profile), "notary_submission_id": notary_id,
+        "dmg_notary_submission_id": dmg_notary_id,
+        "engine_self_test": "passed_before_and_after_signing", "engine_subprocess_smoke": "passed",
+        "bundled_inference": f"llama.cpp {inference_revision}; signed runtime smoke passed; weights downloaded on demand",
+        "swift_tests": "passed", "native_interactive_acceptance": "NOT_RUN"}
     (output / "build-evidence.json").write_text(json.dumps(evidence, indent=2) + "\n")
     print(json.dumps(evidence, indent=2))
     return final

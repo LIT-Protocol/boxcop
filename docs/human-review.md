@@ -1,6 +1,7 @@
-# Local human review policies
+# Approval inbox
 
-The Mac app's **Approvals** page offers two opt-in rules, off by default:
+The approval inbox is part of [agent action checks](host-agent-protection.md). It
+offers two opt-in rules, off by default:
 
 - **External communications:** recognizable `mail`, `mailx`, `sendmail`, curl SMTP
   transfers, `gog`/`gws` Gmail send commands, and Gmail `users.messages.send` /
@@ -24,12 +25,13 @@ action classification. Unsupported shell syntax (including here-documents), alia
 script files, other SDKs/clients, computed methods and dynamically constructed actions
 can escape recognition. The spending rule is still a textual heuristic and can flag
 quoted examples. They run on
-registered Claude Code, Codex and Cursor shell hooks. No MCP, arbitrary browser, remote agent or remote approver enforcement is added. Installed hook coverage and
-vendor enforcement limits still apply; see [agent protection](host-agent-protection.md).
+registered Claude Code, Codex and Cursor shell hooks. MCP tools, browsers, remote
+agents and remote approvers are not covered. Installed hook coverage and vendor
+enforcement limits still apply; see [agent action checks](host-agent-protection.md).
 
 Agent deletion, Git cleanup/reset and SQL drop/truncate commands do not require
-destructive-action review. Legacy `destructive` settings are accepted for
-compatibility but ignored. Delete-command heuristics apply only to human input.
+review. A `destructive` setting is accepted in the stored policy for compatibility
+and ignored.
 
 ## Review lifecycle
 
@@ -50,12 +52,11 @@ approval automatically. A consumed request is not proof of action completion.
 
 Pending and approved requests expire 15 minutes after creation, including time spent
 reviewing. Changing policies expires outstanding requests. While BoxCop is open it watches
-the inbox: the Approvals page refreshes itself, the sidebar and menu bar show the waiting
-count, and each new request posts one macOS notification with sound. The notification
-names only the agent and the matched rule, never the command, folder or agent text.
-Clicking it opens Approvals. It is withdrawn once the request is resolved or expires.
-Turning on a rule asks for notification permission if macOS has never asked. The page
-warns when notifications are off. Hooks still hold actions while BoxCop is closed, but
+the inbox: waiting requests appear in the app, and each new request posts one macOS
+notification with sound. The notification names only the agent and the matched rule,
+never the command, folder or agent text. Clicking it opens the request in the app. It
+is withdrawn once the request is resolved or expires. Turning on a rule asks for
+notification permission if macOS has never asked. Hooks still hold actions while BoxCop is closed, but
 nothing is announced until it is open again.
 
 ## Readable requests and local summaries
@@ -66,20 +67,20 @@ action (a claim, not verification), the decoded command, the working folder, and
 other tool arguments. **Exact request** expands the stored JSON. The native approval
 window shows the same fields above the exact request.
 
-When the local workflow model (Qwen3.5-4B) is already installed, BoxCop asks it for a
-one- or two-sentence plain-English summary plus up to three concerns. Summaries are
+When the local model (Qwen3.5-4B) is already installed, BoxCop asks it for a
+one- or two-sentence plain-English summary plus up to three concerns. This is
+[smart triage](workflow-judgment.md): the summary helps you decide, and it cannot
+approve anything. Summaries are
 labelled as model output and can be wrong. The command and the agent's text go to the
 model as untrusted data. They run on-device through the bundled inference engine.
-Requests never trigger the model download: without the model, the page explains how
-to turn on Local AI workflow review. Summaries are stored in
+Requests never trigger the model download: without the model, requests are shown
+without a summary. Summaries are stored in
 `human-review/summaries.json`, beside the request rows rather than inside them, so
 they never change what is approved or the review hash. Each request is summarized at
 most once, and failures are cached as failed. Entries are removed with their request. Unavailable or busy state fails closed. The final
 hook decision, including review holds, is recorded in the ordinary local decision
-audit. Updated team reporting accepts the `human-review-required` policy identifier
-and sends only the existing decision metadata; command contents and approval
-requests remain local. The inbox separately retains review/consumption timestamps
-and statuses.
+audit. Command contents and approval requests stay on this Mac. The inbox separately
+retains review/consumption timestamps and statuses.
 
 State is stored under `~/Library/Application Support/BoxCop/human-review` with
 private directory/file permissions. It retains full action arguments to enable exact
@@ -103,33 +104,3 @@ subprocess guards a harmless local effect for both mail and Node command shapes:
 no file before approval, one write after approval, and no duplicate on replay.
 The test reviewer is synthetic; this does not establish native UI/authentication or
 live vendor acceptance. Build the Swift app to check the native integration.
-
-## Team configuration
-
-In the web console, open **Policies → Team app settings → Human review policies**.
-Choose **Team enforces**, select the rules and enter a USD spending threshold,
-then **Save team settings**. Choose **Member chooses** to release the override.
-The team configuration replaces personal review settings, including rules
-turned off by the admin. Personal preferences remain saved underneath it.
-
-The existing authenticated `/v1/admin/managed-policy` endpoint accepts an optional
-`review` object with the same strict fields as local policies. Updates require the
-current revision; competing writes return 409. Browser writes require the existing
-session, Origin and CSRF checks. Device and read-only tokens cannot change policy.
-Organization identity comes from authentication, never request fields.
-
-Account-backed Macs receive the configuration through `/v1/device/policy` on their
-existing one-minute sync while BoxCop is open. Hooks read the private cached policy
-without network calls, even while the app is closed. Cached rules survive offline
-operation and revocation; explicit leave restores personal settings. The Approvals
-page identifies the managing team and disables local policy editing; its service
-also rejects local configuration changes. A changed team revision invalidates
-outstanding approvals, including changes received during authentication.
-
-Migration 004 stores review configuration in a separate organization-scoped table.
-Deploy the service before distributing an updated app. Older apps reject the new
-policy shape when review rules are configured and need an update. Saving a policy
-is not delivery/enforcement acknowledgement; the console does not claim receipt.
-This adds central rule configuration, not remote approvals, MDM enforcement or
-resistance to same-user state modification. Legacy accountless reporter enrollment
-does not adopt team rules.

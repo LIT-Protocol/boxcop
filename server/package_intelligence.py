@@ -24,7 +24,8 @@ SCHEMA = 'allay.package-policy.v1'
 MAX_BYTES = 128 * 1024 * 1024
 MAX_PAYLOAD_BYTES = 512 * 1024 * 1024
 MAX_RECORDS = 1_000_000
-COMPRESSED_CONTEXT = b'boxcop.package-policy.zlib.v1\x00'
+# Signature domain of the existing publisher. Like SCHEMA, it is fixed by the feed BoxCop consumes.
+COMPRESSED_CONTEXT = b'allay.package-policy.zlib.v1\x00'
 SOURCES = {
     'openssf': ('Apache-2.0', 'https://github.com/ossf/malicious-packages'),
     'github': ('CC-BY-4.0', 'https://github.com/github/advisory-database'),

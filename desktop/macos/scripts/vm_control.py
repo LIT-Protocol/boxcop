@@ -1,14 +1,16 @@
 #!/usr/bin/env python3
-"""Control the dedicated VM over authenticated SSH + Apple VNC. No host input events.
+"""Control the lab VM over authenticated SSH and Apple VNC. Sends no input to the host.
 
-Requires Remote Management enabled through the guest's Sharing UI for user ham.
-Credentials stay in ~/.sentinel-lab/credentials.json, never command arguments/logs.
-Run with: uv run --with asyncvnc==1.3.0 --with pillow python .../vm_control.py
+Requires Remote Management enabled for the guest user in the guest's Sharing settings.
+Credentials stay in ~/.sentinel-lab/credentials.json and never appear in arguments or logs.
+The lab directory and its SSH alias keep their original names; see docs/vm-lab.md.
+Run with: uv run --with asyncvnc==1.3.0 --with pillow python desktop/macos/scripts/vm_control.py
 """
 import argparse
 import asyncio
 import json
 from pathlib import Path
+import re
 import socket
 import subprocess
 import time
@@ -49,16 +51,8 @@ async def control(args, port):
         if args.key: client.keyboard.press(*args.key)
         if args.text: client.keyboard.write(args.text)
         if args.login_password: client.keyboard.write(settings['password'])
-        if args.account_field:
-            value = json.loads((Path.home()/'.sentinel-lab/meeting-accounts.json').read_text())
-            for part in args.account_field.split('.'):
-                value = value[part]
-            if not isinstance(value, str) or not value:
-                raise ValueError('Requested account field is not configured')
-            # Only use after inspecting the intended guest field. Never echo values.
-            client.keyboard.write(value)
         await client.drain()
-        if args.click or args.move or args.drag or args.key or args.text or args.login_password or args.account_field:
+        if args.click or args.move or args.drag or args.key or args.text or args.login_password:
             await asyncio.sleep(.5)
             pixels=await client.screenshot()
         if args.screenshot:
@@ -71,22 +65,19 @@ def main():
     p=argparse.ArgumentParser(description=__doc__)
     p.add_argument('--screenshot',type=Path)
     p.add_argument('--click',type=int,nargs=2,metavar=('X','Y'))
-    p.add_argument('--move',type=int,nargs=2,metavar=('X','Y'),help='Hover without clicking (for native share pickers)')
+    p.add_argument('--move',type=int,nargs=2,metavar=('X','Y'),help='Hover without clicking')
     p.add_argument('--drag',type=int,nargs=4,metavar=('X1','Y1','X2','Y2'),help='Drag to arrange guest windows')
     p.add_argument('--key',nargs='+')
     p.add_argument('--text',help='Synthetic non-secret test text only')
     p.add_argument('--login-password',action='store_true',help='Type saved guest password into an already inspected authentication field')
-    p.add_argument('--account-field', choices=[
-        f'{service}.{role}.{field}'
-        for service in ['zoom', 'google_meet', 'microsoft_teams']
-        for role in ['host', 'receiver'] for field in ['email', 'password']
-    ] + [f'{service}.meeting_url' for service in ['zoom', 'google_meet', 'microsoft_teams']] + ['zoom.meeting_passcode'],
-        help='Type a saved test-account field without putting its value in command arguments')
+    p.add_argument('--host',help='Guest IP address, when the HostName saved in ~/.sentinel-lab/ssh_config is stale')
     args=p.parse_args()
     with socket.socket() as sock:
         sock.bind(('127.0.0.1',0));port=sock.getsockname()[1]
-    tunnel=subprocess.Popen(['ssh','-F',str(Path.home()/'.sentinel-lab/ssh_config'),'-oBatchMode=yes',
-                             '-oExitOnForwardFailure=yes','-N','-L',f'127.0.0.1:{port}:127.0.0.1:5900','boxcop-lab'],
+    if args.host and not re.fullmatch(r'[0-9A-Fa-f:.]+',args.host): raise SystemExit('--host must be an IP address')
+    override=['-oHostName='+args.host] if args.host else []
+    tunnel=subprocess.Popen(['ssh','-F',str(Path.home()/'.sentinel-lab/ssh_config'),'-oBatchMode=yes',*override,
+                             '-oExitOnForwardFailure=yes','-N','-L',f'127.0.0.1:{port}:127.0.0.1:5900','sentinel-lab'],
                             stdout=subprocess.DEVNULL,stderr=subprocess.DEVNULL)
     try:
         for _ in range(50):

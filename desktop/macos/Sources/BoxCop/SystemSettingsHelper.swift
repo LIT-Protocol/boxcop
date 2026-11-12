@@ -79,10 +79,10 @@ struct SystemSettingsHelperView: View {
             Image(systemName: "arrow.up").font(.system(size: 16, weight: .bold)).accessibilityHidden(true)
             Text(text).font(.system(size: 14, weight: .medium)).fixedSize()
         }
-        .foregroundStyle(AppPalette.ink)
+        .foregroundStyle(Palette.ink)
         .padding(.horizontal, 20).frame(height: 56)
-        .background(AppPalette.raised, in: RoundedRectangle(cornerRadius: 14, style: .continuous))
-        .overlay(RoundedRectangle(cornerRadius: 14, style: .continuous).strokeBorder(AppPalette.border))
+        .background(Palette.sidebar, in: RoundedRectangle(cornerRadius: 14, style: .continuous))
+        .overlay(RoundedRectangle(cornerRadius: 14, style: .continuous).strokeBorder(Palette.border))
     }
 }
 #endif

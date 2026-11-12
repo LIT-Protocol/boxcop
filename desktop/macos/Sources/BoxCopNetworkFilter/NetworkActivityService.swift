@@ -31,7 +31,7 @@ final class NetworkActivityService: @unchecked Sendable {
             guard lstat(path, &info) == 0, info.st_mode & S_IFMT == S_IFDIR, info.st_uid == 0, info.st_mode & 0o022 == 0 else { throw CocoaError(.fileReadNoPermission) }
         }
         if mkdir(Self.root.path, 0o700) != 0 && errno != EEXIST { throw CocoaError(.fileWriteNoPermission) }
-        // Share the lifecycle lock with the old service; never run both simultaneously.
+        // One service per machine.
         lockFD = open(Self.root.appendingPathComponent("service.lock").path, O_RDWR | O_CREAT | O_NOFOLLOW | O_CLOEXEC, 0o600)
         guard lockFD >= 0 else { throw CocoaError(.fileLocking) }
         guard flock(lockFD, LOCK_EX | LOCK_NB) == 0 else { close(lockFD); lockFD = -1; throw CocoaError(.fileLocking) }
@@ -120,8 +120,8 @@ final class NetworkActivityService: @unchecked Sendable {
         lock.lock(); let owner = ownerUID; lock.unlock()
         guard getpeereid(fd, &uid, &gid) == 0, uid == 0 || uid == owner else { return }
         var bytes: [UInt8] = []
-        let deadline = NetworkReviewClock.now + 2
-        while bytes.count < 1024, !bytes.contains(10), NetworkReviewClock.now < deadline {
+        let deadline = ProcessInfo.processInfo.systemUptime + 2
+        while bytes.count < 1024, !bytes.contains(10), ProcessInfo.processInfo.systemUptime < deadline {
             var byte: UInt8 = 0
             guard read(fd, &byte, 1) == 1 else { return }; bytes.append(byte)
         }
@@ -177,6 +177,6 @@ final class NetworkActivityService: @unchecked Sendable {
         }
         if command == "network-threat-blocking-on" { return threatProtection.setEnabled(true) }
         if command == "network-threat-blocking-off" { return threatProtection.setEnabled(false) }
-        return "App enrollment and temporary connection grants are not supported."
+        return "Unsupported command"
     }
 }

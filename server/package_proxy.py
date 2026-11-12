@@ -4,25 +4,27 @@ Only authenticated artifact links issued from upstream metadata can download.
 It is not a transparent system-wide interceptor: existing caches, direct URLs,
 private registries and lockfiles pointing elsewhere remain outside this boundary.
 """
-import argparse
 import base64
 import hashlib
 import hmac
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 import json
-import os
-from pathlib import Path
 import threading
 from urllib.parse import quote, unquote, urlsplit
 
 import httpx
 from packaging.utils import parse_wheel_filename, parse_sdist_filename
 
-from .package_intelligence import (MAX_BYTES, PolicyStore, canonical,
-                                   package_name, version)
+from .package_intelligence import MAX_BYTES, canonical, package_name, version
 
 METADATA_LIMIT = 32 * 1024 * 1024
 ARTIFACT_LIMIT = 1024 * 1024 * 1024
+# Always blocked, in both ecosystems and at any version, so a person can check
+# that the firewall is in the install path: `npm install boxcop-test-malware`.
+# It needs no feed entry and is refused before any upstream request.
+TEST_PACKAGE = 'boxcop-test-malware'
+TEST_REPORT = {'source': 'boxcop', 'id': 'BOXCOP-SELF-TEST', 'url': 'https://github.com/LIT-Protocol/boxcop',
+               'disposition': 'block'}
 
 
 class Upstream:
@@ -53,14 +55,33 @@ def artifact_url(ecosystem, url):
 
 
 class Firewall:
-    def __init__(self, store, secret, upstream=None):
+    def __init__(self, store, secret, upstream=None, log=None):
         self.store, self.secret = store, secret
         self.upstream = upstream or Upstream()
         self.blocks = 0
+        self.log = log
 
     def verdict(self, ecosystem, name, candidate):
-        policy = self.store.policy
-        return policy.assess(ecosystem, name, candidate) if policy else {'decision': 'unknown', 'reports': []}
+        """The policy decision, labelled with the release it is about."""
+        if self_test(ecosystem, name):
+            result = {'decision': 'block', 'reports': [dict(TEST_REPORT)], 'self_test': True}
+        else:
+            policy = self.store.policy
+            result = policy.assess(ecosystem, name, candidate) if policy else {'decision': 'unknown', 'reports': []}
+        return dict(result, ecosystem=ecosystem, name=name, version=candidate)
+
+    def blocked(self, verdict):
+        """Count a refused release and record it for the activity list."""
+        self.blocks += 1
+        if self.log is None or not isinstance(verdict.get('name'), str):
+            return
+        version = verdict.get('version')
+        entry = dict(ecosystem=verdict.get('ecosystem'), package=verdict['name'][:214],
+                     version=version[:128] if isinstance(version, str) else None,
+                     sources=sorted({str(row.get('source'))[:32] for row in verdict['reports']})[:8],
+                     self_test=bool(verdict.get('self_test')))
+        # One install asks for the same release several times; record it once.
+        self.log.append(entry, repeat_of='|'.join(str(entry[key]) for key in ('ecosystem', 'package', 'version')))
 
     def link(self, base, ecosystem, name, candidate, url):
         name = package_name(ecosystem, name)
@@ -99,6 +120,8 @@ class Firewall:
         if len(parts) > length + 1:
             raise ValueError('Unsupported registry path')
         requested = parts[length] if len(parts) > length else None
+        if self_test('npm', name):
+            raise Blocked(self.verdict('npm', name, None))
         if requested:
             # Exact-version requests can be refused before even fetching metadata.
             if self.verdict('npm', name, requested)['decision'] == 'block':
@@ -132,7 +155,7 @@ class Firewall:
                 raise Missing()
             return clean[selected]
         if not clean and blocked:
-            raise Blocked(next(iter(blocked.values())))
+            raise Blocked(dict(next(iter(blocked.values())), version=None))
         return dict(metadata, versions=clean, **{'dist-tags': {tag: candidate for tag, candidate in tags.items() if candidate in clean}})
 
     def npm_artifact(self, path):
@@ -147,6 +170,8 @@ class Firewall:
         package_name('npm', name)
         if not filename or '/' in filename or not filename.endswith('.tgz'):
             raise ValueError('Invalid npm artifact filename')
+        if self_test('npm', name):
+            raise Blocked(self.verdict('npm', name, None))
         metadata = self.upstream.metadata('https://registry.npmjs.org/' + quote(name, safe=''))
         if metadata['name'] != name:
             raise ValueError('Package identity mismatch')
@@ -169,6 +194,8 @@ class Firewall:
 
     def pypi(self, path, base):
         name = package_name('PyPI', unquote(path.removeprefix('/pypi/simple/').rstrip('/')))
+        if self_test('PyPI', name):
+            raise Blocked(self.verdict('PyPI', name, None))
         metadata = self.upstream.metadata('https://pypi.org/simple/' + quote(name, safe='') + '/')
         if package_name('PyPI', metadata['name']) != name:
             raise ValueError('Package identity mismatch')
@@ -193,8 +220,15 @@ class Firewall:
             # .metadata URLs would otherwise bypass authenticated artifact links.
             files.append(rewritten)
         if not files and blocked:
-            raise Blocked(blocked[0])
+            raise Blocked(dict(blocked[0], version=None))
         return {'meta': {'api-version': '1.0'}, 'name': name, 'files': files}
+
+
+def self_test(ecosystem, name):
+    try:
+        return package_name(ecosystem, name).lower() == TEST_PACKAGE
+    except ValueError:
+        return False
 
 
 class Blocked(Exception):
@@ -264,7 +298,7 @@ class Handler(BaseHTTPRequestHandler):
             else:
                 self.respond(404, {'error': 'Unsupported registry endpoint'})
         except Blocked as error:
-            firewall.blocks += 1
+            firewall.blocked(error.verdict)
             self.respond(403, {'error': 'BOXCOP_KNOWN_MALWARE', 'message': 'This package release is listed as malicious.',
                 'reports': [{key: row[key] for key in ('source', 'id', 'url')} for row in error.verdict['reports']]})
         except Missing:
@@ -328,52 +362,3 @@ def refresh(store, url):
     except Exception:
         # Retain last-good policy. No upstream exception body or URL in status.
         store.error = 'Update failed; retaining last verified policy'
-
-
-def main(argv=None):
-    parser = argparse.ArgumentParser(description=__doc__)
-    parser.add_argument('--snapshot', type=Path, required=True)
-    parser.add_argument('--public-key', type=Path, required=True, help='Pinned raw 32-byte Ed25519 public key')
-    parser.add_argument('--state-dir', type=Path, required=True, help='Persistent artifact-link key; retain across restarts')
-    parser.add_argument('--port', type=int, default=8794)
-    parser.add_argument('--update-url', help='HTTPS signed snapshot endpoint; no package names are sent')
-    parser.add_argument('--update-seconds', type=int, default=900)
-    args = parser.parse_args(argv)
-    if not 1024 <= args.port <= 65535 or args.update_seconds < 60:
-        parser.error('Use an unprivileged port and update interval of at least 60 seconds')
-    store = PolicyStore(args.snapshot, args.public_key.read_bytes())
-    if args.update_url:
-        refresh(store, args.update_url)
-    if not store.policy:
-        parser.error('A verified initial snapshot is required')
-    args.state_dir.mkdir(parents=True, exist_ok=True, mode=0o700)
-    key_path = args.state_dir / 'artifact-link.key'
-    try:
-        fd = os.open(key_path, os.O_WRONLY | os.O_CREAT | os.O_EXCL, 0o600)
-        with os.fdopen(fd, 'wb') as stream:
-            stream.write(os.urandom(32))
-    except FileExistsError:
-        pass
-    secret = key_path.read_bytes()
-    if len(secret) != 32:
-        parser.error('Invalid artifact-link key')
-    server = RegistryServer(Firewall(store, secret), args.port)
-    stopped = threading.Event()
-    if args.update_url:
-        def updater():
-            while not stopped.wait(args.update_seconds):
-                refresh(store, args.update_url)
-        threading.Thread(target=updater, daemon=True).start()
-    print(f'BoxCop package firewall listening on http://127.0.0.1:{args.port}; GET /status for coverage', flush=True)
-    try:
-        server.serve_forever()
-    except KeyboardInterrupt:
-        pass
-    finally:
-        stopped.set()
-        server.server_close()
-        server.firewall.upstream.client.close()
-
-
-if __name__ == '__main__':
-    main()

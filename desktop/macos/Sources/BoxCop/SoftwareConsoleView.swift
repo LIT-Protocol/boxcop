@@ -19,7 +19,7 @@ struct SoftwareConsoleView: View {
         _snapshot = State(initialValue: initialSnapshot)
     }
     private var directory: URL {
-        FileManager.default.homeDirectoryForCurrentUser.appendingPathComponent("Library/Application Support/BoxCop/software-console")
+        EngineTools.dataDirectory.appendingPathComponent("software-console")
     }
     var body: some View {
         VStack(alignment: .leading, spacing: 12) {

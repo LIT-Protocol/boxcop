@@ -4,8 +4,8 @@ import Combine
 import Sparkle
 
 /// One updater per GUI session. Command-line helpers and development builds never
-/// start update checks. Sparkle's normal termination path drains the sidecar via
-/// EndpointDelegate.applicationShouldTerminate before replacing the app.
+/// start update checks. Sparkle's normal termination path stops the engine via
+/// AppDelegate.applicationShouldTerminate before replacing the app.
 @MainActor final class AppUpdater: NSObject, ObservableObject, SPUStandardUserDriverDelegate {
     @Published private(set) var canCheckForUpdates = false
     @Published private(set) var availableVersion: String?
@@ -22,14 +22,24 @@ import Sparkle
     /// Exercise Sparkle's real configuration and helper validation in the packaged
     /// app. The CLI exits before the next run-loop cycle, so no update check,
     /// permission prompt, or install is scheduled by this smoke check.
-    static func validateStartup() throws {
+    /// False when there is no feed: nothing is started and no Sparkle object is created.
+    @discardableResult static func validateStartup() throws -> Bool {
+        guard feedConfigured else { return false }
         let controller = SPUStandardUpdaterController(startingUpdater: false, updaterDelegate: nil, userDriverDelegate: nil)
         try controller.updater.start()
+        return true
+    }
+
+    /// Sparkle refuses to start without a feed URL, so a build with none simply has no updater.
+    static var feedConfigured: Bool {
+        guard let feed = Bundle.main.object(forInfoDictionaryKey: "SUFeedURL") as? String,
+              let url = URL(string: feed), url.scheme == "https", url.host?.isEmpty == false else { return false }
+        return true
     }
 
     func start() {
         #if arch(arm64)
-        guard controller == nil,
+        guard controller == nil, Self.feedConfigured,
               Bundle.main.object(forInfoDictionaryKey: "BoxCopReleaseProfile") as? String == "distribution",
               !CommandLine.arguments.contains(where: { $0.hasPrefix("--") }) else { return }
         let controller = SPUStandardUpdaterController(startingUpdater: false, updaterDelegate: nil, userDriverDelegate: self)

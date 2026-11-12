@@ -1,6 +1,9 @@
-# Selected software updates
+# Machine health: guided updates
 
-Home and Software review show one selectable action per supported installation,
+Part of the machine health layer; findings come from the
+[software inventory](software-exposure.md).
+
+Health shows one selectable action per supported installation,
 with supported actions checked initially, Select all / Select none, and a batch
 preview before Apply. Selecting or deselecting an item invalidates the preview.
 The table groups installations by their shared fix, with affected software in the
@@ -62,10 +65,10 @@ as a verified fix. A positively verified installed version is reported as
 copies. Results survive app restarts in a private, atomic `software-remediation-results.json`
 store (latest attempt per installation, up to 128). Pending attempts are recorded
 before execution, so a missing completion is visible after a crash. Outcomes also
-remain in the workflow journal. Failed updates remain retryable; migration/manual
+remain in the activity journal. Failed updates remain retryable; migration/manual
 review outcomes move out of the automatic-update group while their installation
 evidence is unchanged. New scan evidence supersedes those classifications. Failed commands expose an expandable Command details section and
-write a private, 256 KiB-bounded `software-remediation.jsonl` in BoxCop’s BoxCop
+write a private, 256 KiB-bounded `software-remediation.jsonl` in BoxCop's
 application-support directory. URL credentials and common secret query parameters
 are redacted. stderr is kept separate from machine-readable stdout. No service restart, project-pin change, or privileged install is automatic. Old
 Homebrew versions are removed through cleanup included in the approved upgrade plan

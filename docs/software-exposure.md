@@ -1,17 +1,14 @@
-# Automatic software exposure inventory
+# Machine health: software inventory
 
-The main app scans selected local software roots on launch and every five minutes
-in the development profile. The Software exposure panel shows findings, remediation,
-primary-source links, scan time, incomplete coverage and stale results. Recheck runs
-a fresh scan. Beta starts its first scan when the user finishes the setup wizard
-with monitoring enabled, then refreshes every five minutes. Later launches resume
-automatic inventory when setup is complete and monitoring is authorized. Production
-preview starts automatic inventory when monitoring was already authorized at launch.
-Inventory is a separate background child; paste
-policy evaluation never waits for the scan. Closing the app stops scheduled scans.
+This is BoxCop's machine health layer. The app scans selected software locations
+once protection is on and repeats the scan while it is open. Health shows the
+findings, how to fix each one, links to primary sources, the scan time, and
+whether coverage was incomplete or the result is stale. Recheck runs a fresh scan.
+The scan is a separate background process, so nothing else waits for it. Closing
+the app stops scheduled scans.
 
-The same implementation powers `tools/supply_inventory.py ROOT` and the packaged
-app's `--dev-software-inventory [--root ABSOLUTE_PATH]` command. It reads metadata;
+The same implementation powers `tools/supply_inventory.py ROOT` and the engine's
+`--software-inventory [--cache] [--root ABSOLUTE_PATH]` mode. It reads metadata;
 it never starts an inspected interpreter, imports a package, runs an installer,
 executes a launch daemon or follows instructions in a feed.
 
@@ -47,8 +44,7 @@ metadata may be false, stale or replaced. Unversioned Wasmtime remains unresolve
 | WordPress / Avada / Nextcloud built-in CODE / GitLab | Local source/deployment metadata; separate WordPress incidents, exact product identities and explicit remote/runtime limits |
 | Time4Popcorn | Helper/daemon presence and ambiguous Popcorn app identity review; no blanket identification by display name |
 
-The [remaining feed review](../research/security-feed-remaining-coverage.md) adds
-Cloudflare client update advice, unresolved embedded-browser app reviews, and
+A later feed review added Cloudflare client update advice, unresolved embedded-browser app reviews, and
 explicit-root checks for Echo `go.mod`, GoAhead vendor source metadata and selected
 Compose/Kubernetes image declarations. Deployment/source findings cannot prove that
 installed or running code is fixed: their state remains unresolved even when
@@ -56,15 +52,15 @@ installed or running code is fixed: their state remains unresolved even when
 `*.k8s.json` / `*.k8s.yaml` / `*.k8s.yml` are supported; images are matched by exact
 repository identity. No cluster, Docker socket, registry or Go tool is contacted.
 YAML aliases, duplicate keys, unsafe constructors and resource-limit violations are
-rejected. See the review for formats, bounds, sources and unsupported layouts.
+rejected.
 
-These checks do not intercept npm installs or lifecycle scripts. Periodic inventory
-cannot guarantee detection before execution.
+Inventory does not intercept installs or install scripts; the
+[install gate](package-registry-firewall.md) and
+[containment](install-script-protection.md) do that. A periodic scan cannot
+guarantee detection before something runs.
 
-Twenty-four additional feed incident entries have reviewed discovery routes, primary
-sources and limits in the [first batch](../research/security-feed-dozen-coverage.md)
-and [second batch](../research/security-feed-next-dozen-coverage.md). Project-local Python/npm
-and Composer installs outside the default roots require an explicit scan, for example:
+Project-local Python, npm and Composer installs outside the default roots need an
+explicit scan, for example:
 
 ```sh
 .venv/bin/python tools/supply_inventory.py --root /absolute/path/to/project
@@ -76,9 +72,8 @@ lockfile declarations. Custom vendor paths and manifests exceeding 256 KiB remai
 incomplete/unsupported. Homebrew HEAD/custom-tap metadata remains unresolved. JAR and CMS/deployment
 metadata can describe cached or inactive code, not a running service.
 
-The [November feed review](../research/security-feed-review-november.md) adds these
-checks and a separate Chrome 157 baseline while preserving the October finding.
-All new package names have fixture-tested automatic installation layouts and
+The November feed review added a separate Chrome 157 baseline while preserving
+the October finding. All new package names have fixture-tested automatic installation layouts and
 explicit-root discovery. Project installs still require an explicit root. Node-RED
 settings are not executed or interpreted, and Siemens Industrial OS versions are
 not used as npm fix versions. Better Auth remediation includes updating both
@@ -92,8 +87,8 @@ with per-advisory review dates (Chrome November baseline reviewed 2026-11-04),
 [`server/november_advisories.py`](../server/november_advisories.py), reviewed 2026-11-04.
 The pwn.watch feed is a discovery source, not live policy input.
 The [local daily review](security-feed-review.md) checks it and Cloudflare Zero Wire
-and proposes tested additions through draft PRs. New feed text never
-updates root policy. Exact LiteLLM/SubQuery distribution checks remain supported.
+and proposes tested additions through draft PRs. Feed text never changes policy
+by itself. Exact LiteLLM/SubQuery distribution checks remain supported.
 
 `affected_version` is a metadata version match, not an observed exploit.
 `fixed_for_advisory` describes only the reviewed range, not universal safety or the
@@ -117,9 +112,9 @@ and package source. Symlinks and app bundles without standard metadata are decla
 coverage exclusions; explicit recursive scans still mark skipped symlinks incomplete.
 Symlink-based installations may need a canonical explicit-root scan. Known packages
 without a version remain unresolved observations; npm configuration-only manifests
-do not make a scan incomplete. Home shows coverage gaps under Your coverage, while
-actual software findings remain under Needs attention. The review shows root states,
-paths of metadata failures and guidance; retries do not repair installed metadata.
+do not make a scan incomplete. The app shows coverage gaps separately from software
+findings, with root states, the paths of metadata failures and guidance. Retrying
+does not repair installed metadata.
 Plists are parsed unchanged first. If XML parsing fails, UTF-8 XML gets one
 in-memory retry with XML-invalid ASCII control characters removed (legal tabs,
 newlines and carriage returns remain). This accommodates stray copyright control
@@ -133,10 +128,10 @@ coverage and flags the last successful result stale after ten minutes.
 
 `~/Library/Application Support/BoxCop/software-inventory.json` is an atomic mode
 0600 cache in the existing owned mode 0700 app directory. It is replaced each scan;
-no raw metadata file is retained. Failures are visible. The workflow journal also
+no raw metadata file is retained. Failures are visible. The activity journal also
 records a `software_inventory` summary with scan/review timestamps, observation and
 review counts, and `finding_only` enforcement. These records are local and may reveal
-software names and filesystem paths. Inventory does not transmit them to pwn.watch.
+software names and filesystem paths. Nothing is sent to pwn.watch or anywhere else.
 
 Schema `boxcop.software-inventory.v2` includes:
 
@@ -156,41 +151,35 @@ The v1 CLI's positional root and Python `inventory(root)` adapter remain availab
 but CLI JSON now uses v2 and only the reviewed software set is retained. Consumers
 must check the schema and timestamps. Metadata identity is **not executable identity**.
 
-## Binding, enforcement and recovery
+## What a finding means
 
-Inventory never automatically adds an executable/hash to root policy. An operator
-must independently review the actual artifact/vendor provenance and affected build
-before adding its digest to the existing root-owned reviewed hash policy. The
-[byte inventory](../research/supply-gap-closure.md) continuously binds reviewed hashes
-to stable stat snapshots in configured roots; new/changed bytes are held until
-rescanned. An update removes a known-bad match only after reassessment. No-match
-bytes are not certified safe. Root policy changes/revocations require service restart.
+Inventory reports findings. It does not block, quarantine or uninstall anything,
+and it never runs a command taken from a feed or a plist. Code that is already
+running, loaded libraries and credentials already in memory are unaffected by an
+update, so restart guidance stays visible after the installed version changes.
+Recheck refreshes the evidence.
 
-Already-running code, loaded libraries, descriptors and credentials already in memory
-are not revoked. Restart/rebuild guidance remains visible after the installed version
-changes. The UI's Recheck refreshes evidence; it never overrides a launch hold or
-uninstalls software. For erroneous fixture holds, restore the prior reviewed root
-policy and restart the service; for network-service outage, disable the development
-filter before troubleshooting. Approved endpoints remain possible misuse channels.
+For some findings BoxCop can prepare and apply the update for you; see
+[software-remediation.md](software-remediation.md).
 
-## Time4Popcorn privileged helper
+### Time4Popcorn privileged helper
 
 The researcher identifies `/Library/PrivilegedHelperTools/PT.updd` and
 `/Library/LaunchDaemons/PT.updd.plist` in the abandoned fork. The unrelated modern
 Popcorn Time product is not identified as affected. BoxCop reports file presence,
-owner and metadata identity as a **candidate**, not proof of provenance or execution.
-The UI links to the researcher's removal/disablement guidance. Verify the helper and
-launch-daemon identity before an administrator follows that guidance. The documented
-researcher command is `sudo launchctl unload -w /Library/LaunchDaemons/PT.updd.plist`;
-then verify the updater has stopped and remove the abandoned application. No generic
-command from a plist or feed is executed by BoxCop.
+owner and metadata identity as a **candidate**, not proof of provenance or
+execution, and links to the researcher's removal guidance. Verify the helper and
+launch-daemon identity before an administrator follows that guidance. BoxCop does
+not disable root helpers.
 
-Root helpers are outside the normal-user ES policy. The VM test deliberately shows a
-root read succeeding; it is evidence of the boundary, not a claimed prevention. The
-fixture only creates an inert marker file, never a running privileged updater, and
-removes only that marker. There is no automatic root-helper disablement or root
-compromise defense. Do not broaden UID scope or disable SIP on a host to imply it.
+## Validation
 
-Production ES/Network Extension signing, entitlements, provisioning, installation
-and supported-host acceptance remain release gates. VM development results are not
-shipped customer protection. See [validation](../research/software-exposure-validation.md).
+```sh
+python -m pytest -q tests/test_software_inventory.py tests/test_feed_advisories.py \
+  tests/test_feed_advisories_extended.py tests/test_feed_advisories_november.py \
+  tests/test_feed_advisories_remaining.py tests/test_supply_chain.py
+```
+
+The tests build fixture installation layouts in temporary directories. They cover
+affected, fixed, unknown and benign versions, traversal limits, symlink rejection
+and incomplete scans. They do not scan the developer's Mac.

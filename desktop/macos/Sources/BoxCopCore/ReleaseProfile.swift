@@ -1,6 +1,6 @@
 import Foundation
 
-/// Capability is independent of release channel. Packaged builds cannot enable lab paths.
+/// Capability is independent of release channel. Packaged builds reject development-only flags.
 public enum ReleaseProfile: String, Sendable {
     case development, distribution, productionPreview
     case limitedDevelopment = "limited-development"
@@ -14,19 +14,12 @@ public enum ReleaseProfile: String, Sendable {
         return arguments.contains("--production-mode") ? .productionPreview : .development
     }
 
-    public var usesEndpointSecurity: Bool { self == .development || self == .productionPreview }
-    public var usesNetworkProtection: Bool { self != .limitedDevelopment }
-    public var usesStandaloneNetworkProtection: Bool { self == .distribution }
-    public var requiresMonitoringConsent: Bool { self == .limitedDevelopment || self == .distribution }
-    public var automaticDevelopmentCollection: Bool { self == .development }
-    // Preserve existing opt-in choices across upgrades and channel changes.
-    public var consentKey: String { requiresMonitoringConsent ? "beta-consent-choices-v1" : "consent-choices-v1" }
+    /// Only the signed distribution build embeds the network system extension.
+    public var usesNetworkProtection: Bool { self == .distribution }
+    public var packaged: Bool { self == .limitedDevelopment || self == .distribution }
 
     public func rejects(arguments: [String]) -> Bool {
-        requiresMonitoringConsent && arguments.contains {
-            $0.hasPrefix("--dev-endpoint-security-") || $0.hasPrefix("--dev-network-filter-") ||
-            $0 == "--dev-agent-run" || $0 == "--dev-es-lifecycle-test"
-        }
+        packaged && arguments.contains { $0.hasPrefix("--dev-network-filter-") }
     }
 }
 

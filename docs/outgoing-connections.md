@@ -1,34 +1,33 @@
 # Network activity and threat-domain blocking
 
-Activity journals now use [application-level encryption and explicit plaintext export](journal-encryption.md). Historical JSONL filenames contain encrypted records; export before using offline replay tools.
+This is BoxCop's outbound control layer. It needs the Developer ID signed build;
+the limited-development build has no network extension. History is stored with
+[application-level encryption](journal-encryption.md).
 
-Both beta and stable distribution builds observe new outgoing network flows across this Mac. There
+The signed build observes new outgoing network flows across this Mac. There
 is no enrollment list: apps installed after setup, command-line tools, helpers and
 system processes are included when macOS delivers their flows to the extension.
 **New flows to listed threat hostnames are blocked before payload transfer. Other
 flows are logged and allowed.** This is destination reputation, not payload
-inspection or a guarantee that allowed downloads are safe. Endpoint Security
-approval and agent sandboxes are not required.
+inspection or a guarantee that allowed downloads are safe.
 
 ## Setup
 
 1. Install the signed, notarized BoxCop build in `/Applications`.
-2. In setup, install (or update) the network extension and approve it in macOS.
-3. Enable network protection and accept macOS's network-filter permission.
-4. Connections shows the live threat-blocking switch, list date and activity.
+2. In the app, turn on outbound control. macOS asks you to allow the system
+   extension in System Settings, and then to allow the network filter.
+3. The app shows whether the filter is active, the date of the threat list and
+   recent activity. `BoxCop --status` reports the same state.
 
-No app picker or per-app administrator prompts are needed. The wizard checks the
-installed extension version, filter settings and observation service. Previously
-completed installations return to setup if those are missing. Network observation
-can be enabled without consenting to clipboard or screen monitoring. Connections
-shows current state and the latest activity after setup.
+No app picker or per-app prompts are needed. The app checks the installed
+extension version, the filter settings and the observation service, and reports
+the layer as "Needs setup", with the missing step, when any of them is missing.
+In a limited-development build the layer is "Unavailable".
 
-Upgrading from the selected-app prototype replaces its blocking provider. The new
-provider never consults old enrollment or temporary rules. A hostname match is
-evaluated synchronously from an immutable in-memory list, independently of process
-inspection and log writes. Unknown process identity, a full logging queue or an
-unwritable journal cannot bypass a domain block or cause an unrelated flow to be
-blocked. The legacy ES-backed development route is separate.
+A hostname match is evaluated synchronously from an immutable in-memory list,
+independently of process inspection and log writes. Unknown process identity, a
+full logging queue or an unwritable journal cannot bypass a domain block or cause
+an unrelated flow to be blocked.
 
 ## Threat list and limits
 
@@ -39,8 +38,8 @@ GPL-3.0 license, attribution and pinned source/hash manifest are in
 `Contents/Resources/ThreatDomains`. Runtime verifies the SHA-256 and entry count.
 No reputation queries or automatic feed requests leave this Mac.
 
-This first version ships snapshot updates with app releases. The UI shows the
-upstream publication date and warns after seven days; old snapshots keep working
+The list is a snapshot that ships with each app release. The app shows the
+number of hosts and the upstream publication date. Old snapshots keep working
 but do not know about newer threats. The release workflow runs
 `desktop/macos/scripts/refresh_threat_domains.py`, which pins the newest upstream
 commit, validates the list with the runtime's host rules and rewrites the snapshot
@@ -63,9 +62,9 @@ control socket lets root or the configuring user switch to logging-only mode;
 that preference persists in the private `threat-blocking.txt` file. This is a user
 control, not tamper resistance against malicious code running as that user or root.
 A corrupt/missing bundled list is reported and falls back to logging-only; a
-corrupt preference is reported with blocking off until reset. The UI exposes a
-false-positive escape hatch by disabling threat blocking without disabling logs.
-No per-domain exceptions are implemented yet.
+corrupt preference is reported with blocking off until reset. For a false
+positive, the "Block known malware hosts" switch under Protections turns blocking
+off while connections are still recorded. There are no per-domain exceptions yet.
 
 The reserved hostname `malware-test.boxcop.test` is an explicit harmless test rule,
 labeled separately from threat intelligence. It does not resolve publicly. Native
@@ -79,7 +78,7 @@ Test mappings are removed afterward; no live malicious host or payload is contac
 
 Each event has a UUID, timestamp, outgoing direction and `observed_allowed` or
 `blocked_threat_domain` decision. Blocked records include the matched hostname,
-list source/revision and reason; old observation-only records remain readable.
+list source/revision and reason.
 Exported timestamps currently use Foundation seconds since 2001-01-01 UTC.
 It describes a newly attempted flow, not a confirmed connection or transfer.
 
@@ -99,12 +98,12 @@ This follows the process/destination metadata used by
 and [process inspection](https://github.com/objective-see/LuLu/blob/master/LuLu/Extension/Process.m).
 We retain both the observed endpoint and any hostname, including hostname
 provenance. We do not infer a verified domain from reverse DNS. An IP-only flow
-stays IP-only. Ancestry is an observation-time snapshot, not ES-backed lineage.
+stays IP-only. Ancestry is a snapshot taken when the flow was observed.
 
 Fields are bounded: URLs 2,048 characters, arguments 4,096 bytes/64 entries,
 ancestry 16 generations, process path 4,096 characters. Environment variables and
-payloads are not collected. Arguments and URLs can contain sensitive information;
-setup and the history view disclose this. No network telemetry leaves the Mac.
+payloads are not collected. Arguments and URLs can contain sensitive information.
+No network telemetry leaves the Mac.
 
 ## History, export and health
 
@@ -114,12 +113,11 @@ The extension stores owner-only encrypted record files under
 file. History survives app closure and extension restart. This is a bounded
 local history, not a tamper-proof audit trail or a guarantee of crash durability.
 
-The default UI summarizes apps and destinations for Today or the Last 7 Days
-(today and the preceding six local calendar days). Expand an app to see its
-hostnames and IP-only destinations, attempt/blocked counts, processes and first/last
-seen times. Domains reverses that grouping; Blocked shows rows with blocked attempts
-and their reason. Unknown attribution and missing hostnames remain explicit.
-Counts describe attempted flows, not established connections or transferred bytes.
+Under Protections, outbound control lists today's connections by app, with the
+number of hosts and attempts for each. Blocked attempts appear in Events with the
+app, the process, its signing identity and the reason. Unknown attribution and
+missing hostnames stay explicit. Counts describe attempted flows, not established
+connections or transferred bytes.
 
 Daily app/process/destination summaries are stored separately in the private
 `network-summary.json` encrypted checkpoint, so raw-log rotation does not erase statistics.
@@ -129,18 +127,17 @@ backfilled. Summaries survive restart and retain seven calendar days, capped at
 reported cumulatively since summary collection began. Checkpoints are atomic,
 owner-only, and saved in batches every five seconds; an abrupt restart may lose
 the latest counters. Failed checkpoints and incomplete observation are reported
-in the UI. No payloads or byte totals are collected.
+in the app. No payloads or byte totals are collected.
 
-The optional Recent Activity view searches the latest 100 retained events, displays
-up to 30 matches, opens connection details, and exports all retained raw records as JSON. The export is a
-user-controlled file. Root and the user who initially enabled observation can
+**Export history** writes all retained raw records to a JSON file you choose.
+Root and the user who initially enabled observation can
 read history through the authenticated local socket; other local users cannot.
 The provider observes all UIDs, including system processes, rather than filtering
 collection to that owner.
 
 A bounded queue decouples observation from process inspection and disk writes.
-The view reports flows observed, queue drops and write failures for the current
-provider session. Unknown attribution remains visible. Overflow drops log entries,
+The app reports dropped records and write failures for the current provider
+session. Unknown attribution remains visible. Overflow drops log entries,
 never changes the threat verdict. Disabling the filter stops collection and
 blocking; removing the
 extension retains history. Existing sockets, cloud agents, unsupported flow types
@@ -148,57 +145,30 @@ and traffic macOS does not deliver are coverage limits.
 
 ## Signing and provisioning
 
-The canonical local credential/configuration directory is `~/.sentinel-lab/`.
-Private signing keys and notarization secrets remain in macOS Keychain. Never
-commit credentials. Developer ID profiles are:
+The app identifier is `local.sentinel.endpoint` and the extension identifier is
+`local.sentinel.endpoint.network-filter`. These are unchanged from the app BoxCop
+was ported from, because the Developer ID provisioning profiles are bound to
+them. Both need the `content-filter-provider-systemextension` capability; the app
+also needs `com.apple.developer.system-extension.install`. No Endpoint Security
+entitlement is requested.
 
-- `~/.sentinel-lab/profiles/Allay_Developer_ID.provisionprofile`
-- `~/.sentinel-lab/profiles/Allay_Network_Developer_ID.provisionprofile`
-
-The app identifier is `local.sentinel.endpoint`; the extension identifier is
-`local.sentinel.endpoint.network-filter`. Both need
-`content-filter-provider-systemextension`; the app also needs
-`com.apple.developer.system-extension.install`. No ES entitlement is included.
-`BOXCOP_APP_PROFILE` and `BOXCOP_NETWORK_PROFILE` override profile paths.
-
-```sh
-./build.sh
-```
-
-The wrapper always builds `distribution`, with channel `beta` by default, matching main-branch CI, and automatically uses
-the current Unix timestamp as the extension build number. `BOXCOP_EXTENSION_VERSION`
-can override it with an increasing positive integer. `BOXCOP_CHANNEL=stable` selects the stable channel with the same protections.
-Only the explicit lower-level `--profile limited-development` omits the network
-extension for development validation. Legacy `BOXCOP_PROFILE` overrides are rejected.
-
-The builder validates Apple profiles, signs, notarizes and staples the app and DMG.
-It never falls back to ad-hoc signing. App and extension both carry
-`NSSystemExtensionUsageDescription`. CI signing triggers are unchanged.
+`./build.sh` validates both profiles, embeds the extension with the bundled threat
+list, signs, notarizes and staples. See [releasing.md](releasing.md). The app and
+the extension both carry an `NSSystemExtensionUsageDescription`.
 
 ## Validation
 
-The [native threat-blocking report](../artifacts/threat-domain-blocking-live-v1.json)
-records signed/notarized build 112 on the SIP-enabled VM. An actual listed hostname
-and the reserved test hostname were routed only to our harmless receiver. With
-blocking on, both fresh DNS attempts and cached-DNS TCP attempts were denied with
-zero downloaded bytes. The unlisted name on that same receiver stayed reachable.
-The UI's logging-only switch restored both downloads and persisted across a forced
-provider restart. Making the journal unwritable did not bypass blocking or deny
-the unlisted flow. The native details view and exported history retain the reason
-and source revision. The `/etc/hosts` hostname-visibility miss is recorded too.
+`swift test --package-path desktop/macos` covers hostname matching, metadata
+provenance, unknown identities, journal persistence, rotation, size bounds, file
+permissions and symlink rejection. `tests/test_threat_domain_refresh.py` covers
+the list refresh, and `tests/test_protected_bundle.py` covers extension packaging
+and profile validation.
 
-Core tests exercise metadata provenance, unknown identities, journal persistence,
-rotation, size bounds and file permissions/symlink rejection. The [native observation report](../artifacts/network-observation-live-v1.json)
-records a signed/notarized build 111 on a SIP-enabled macOS 14.6.1 VM: automatic
-coverage of a newly added tool, TCP/UDP receiver delivery, `curl → example.com`
-metadata, network-only setup, local access controls and native JSON export.
-History survived a forced provider restart in candidate 110, although termination
-reset the VM SSH connection. A deliberate journal write failure in build 111
-reported four errors while all four test connections reached the receiver; writes
-resumed after recovery. This evidence is separate from the historical blocking
-prototype's [setup and TCP test](../artifacts/network-setup-live-v1.json).
+Whether the extension loads, blocks a listed hostname and leaves other traffic
+alone can only be checked with a signed build on a Mac. That check is run in the
+[lab VM](vm-lab.md) using the reserved test hostname and a local receiver, so no
+real malicious host is contacted.
 
-Remaining qualification includes high-volume performance, sleep/wake, VPNs and
-other filters, all supported macOS versions, hostname availability across apps,
-multiple login sessions, abrupt termination and uninstall/reinstall. These are
-not established by a successful build or a single VM run.
+Not yet established: high-volume performance, sleep and wake, coexistence with
+VPNs and other filters, every supported macOS version, multiple login sessions,
+abrupt termination, and uninstall followed by reinstall.

@@ -2,11 +2,17 @@
 import AppKit
 import NetworkExtension
 import SystemExtensions
+import BoxCopCore
 
 /// Activation is a system extension inside the main app, not a second UI app.
 final class NetworkFilterControl: NSObject, OSSystemExtensionRequestDelegate {
     private static var retained: NetworkFilterControl?
     static let identifier = "local.sentinel.endpoint.network-filter"
+    /// Only the distribution build embeds the extension, and only an embedded extension can be activated.
+    static var bundled: Bool {
+        ReleaseProfile.resolve(bundleProfile: Bundle.main.object(forInfoDictionaryKey: "BoxCopReleaseProfile") as? String, arguments: []).usesNetworkProtection &&
+            FileManager.default.fileExists(atPath: Bundle.main.bundleURL.appendingPathComponent("Contents/Library/SystemExtensions/\(identifier).systemextension").path)
+    }
     static func run(enable: Bool) {
         let controller = NetworkFilterControl(); retained = controller
         _ = NSApplication.shared
@@ -25,7 +31,7 @@ final class NetworkFilterControl: NSObject, OSSystemExtensionRequestDelegate {
                 config.filterSockets = true; config.filterPackets = false
                 config.filterDataProviderBundleIdentifier = Self.identifier
                 manager.providerConfiguration = config
-                manager.localizedDescription = "BoxCop outbound protection"
+                manager.localizedDescription = "BoxCop outbound control"
             }
             manager.isEnabled = enabled
             manager.saveToPreferences { error in self.finish(error) }

@@ -1,9 +1,9 @@
 #!/usr/bin/env bash
 # CI-only launch smoke for a freshly built BoxCop.app on a macOS CI runner.
 #
-# Proves only that the signed bundle launches through LaunchServices, stays up through
-# first run in a packaged distribution profile, and starts no collection or policy engine before opt-in. It does not
-# click the UI, grant Accessibility, read the clipboard or exercise the Command-V guard.
+# Proves only that the packaged bundle launches through LaunchServices, stays up on the
+# first-run setup screen, and starts no engine and writes no audit data before the person
+# turns protection on. It does not click the UI or exercise any protection.
 set -euo pipefail
 
 if [ "$#" -ne 2 ]; then
@@ -28,7 +28,7 @@ release_profile="$("$EXE" --release-profile)"
 case "$release_profile" in distribution|limited-development) ;; *) fail "expected packaged distribution or limited-development profile" ;; esac
 say "release profile=$release_profile"
 
-# Packaged apps now stop at the installation prompt outside /Applications.
+# Packaged apps stop at an installation prompt when run from outside /Applications.
 # Exercise the installed first-run path without overwriting another BoxCop copy.
 installed_app="/Applications/BoxCop-CI-$(uuidgen).app"
 mkdir "$installed_app"
@@ -59,15 +59,16 @@ done
 [ -n "$pid" ] || fail "BoxCop did not launch"
 say "launched pid=$pid"
 
-# First-run window, owner lock and wake observer are set up; give AppKit time to settle.
+# The setup screen and the single-owner lock are created at launch; give AppKit time to settle.
 sleep 8
 kill -0 "$pid" 2>/dev/null || fail "BoxCop exited during first run"
 say "still running after 8s"
 
-if pgrep -x boxcop-engine >/dev/null; then fail "policy engine started before consent"; fi
-say "no boxcop-engine process before consent"
-[ ! -e "$SUPPORT/events.sqlite3" ] || fail "audit database created before consent"
-say "no audit database before consent"
+if pgrep -x boxcop-engine >/dev/null; then fail "engine started before setup was confirmed"; fi
+say "no boxcop-engine process before setup"
+# The engine owns every database in the support directory, so none may exist yet.
+if find "$SUPPORT" -name '*.sqlite3*' -print -quit 2>/dev/null | grep -q .; then fail "audit database created before setup was confirmed"; fi
+say "no audit database before setup"
 [ -f "$SUPPORT/native-owner.lock" ] || fail "single-owner lock was not created"
 say "owner lock present; support dir mode=$(stat -f '%Lp' "$SUPPORT"), lock mode=$(stat -f '%Lp' "$SUPPORT/native-owner.lock")"
 [ "$(stat -f '%Lp' "$SUPPORT")" = "700" ] || fail "application-support directory is not 0700"
@@ -86,4 +87,4 @@ for _ in $(seq 1 20); do
 done
 if kill -0 "$pid" 2>/dev/null; then fail "BoxCop did not exit after SIGTERM"; fi
 pgrep -x boxcop-engine >/dev/null && fail "an engine process outlived the app"
-say "LAUNCH_SMOKE_PASS: launched, stayed up, no engine or audit data before consent, exited"
+say "LAUNCH_SMOKE_PASS: launched, stayed up, no engine or audit data before setup, exited"

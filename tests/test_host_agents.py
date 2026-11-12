@@ -101,7 +101,7 @@ def test_real_bundled_engine_and_private_audit(layout,harness,command,allowed):
     import sqlite3
     with sqlite3.connect(data/'events.sqlite3') as db:
         record=json.loads(db.execute('select record from events order by sequence desc limit 1').fetchone()[0])
-    assert record['event']['actor']=='agent'
+    assert record['event']['app']==harness and record['event']['action']=='command'
     assert record['event']['content']=='[not retained]'
     assert (data/'events.sqlite3').stat().st_mode & 0o777==0o600
 

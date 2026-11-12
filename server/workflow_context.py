@@ -1,7 +1,6 @@
-"""Ephemeral, bounded workflow evidence for local classifier/judgment consumers.
+"""Ephemeral, bounded evidence about linked activity, for the local triage model.
 
 No paths are opened, captured instructions executed, or decisions authorized here.
-The content classifier remains content-only; context evidence is kept separately.
 """
 from copy import deepcopy
 from datetime import datetime
@@ -11,7 +10,7 @@ from time import monotonic
 
 SCHEMA = 'boxcop.workflow-context.v1'
 MAX_BYTES = 96 * 1024
-TEXT_FIELDS = ('instruction', 'arguments', 'result_summary', 'recognized_text', 'selected_text', 'context_text')
+TEXT_FIELDS = ('instruction', 'arguments', 'result_summary')
 SENSITIVE = {'secret', 'private-key', 'ssn', 'medical', 'hr-sensitive', 'restricted-business'}
 
 

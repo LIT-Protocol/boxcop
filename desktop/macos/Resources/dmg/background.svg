@@ -1,29 +1,29 @@
 <svg xmlns="http://www.w3.org/2000/svg" width="660" height="360" viewBox="0 0 660 360">
-  <!-- BoxCop installer window. Finder centres the app icon at (170, 200) and Applications at (490, 200). -->
+  <!-- BoxCop installer window. Finder centres the app icon at (170, 200) and Applications at (490, 200).
+       Palette: navy ink #0A1730, blue #2F6BFF. Re-render background.png (660x360) and
+       background@2x.png (1320x720) after editing; see desktop/macos/README.md. -->
   <defs>
     <linearGradient id="wash" x1="0" y1="0" x2="0" y2="1">
-      <stop offset="0" stop-color="#FBFCFD"/>
-      <stop offset="1" stop-color="#EBF0F4"/>
+      <stop offset="0" stop-color="#FAFBFE"/>
+      <stop offset="1" stop-color="#E9EEF9"/>
     </linearGradient>
     <radialGradient id="glow" cx="0.5" cy="0" r="0.8">
-      <stop offset="0" stop-color="#416985" stop-opacity="0.10"/>
-      <stop offset="1" stop-color="#416985" stop-opacity="0"/>
+      <stop offset="0" stop-color="#2F6BFF" stop-opacity="0.10"/>
+      <stop offset="1" stop-color="#2F6BFF" stop-opacity="0"/>
     </radialGradient>
     <linearGradient id="trail" x1="268" y1="0" x2="392" y2="0" gradientUnits="userSpaceOnUse">
-      <stop offset="0" stop-color="#416985" stop-opacity="0.15"/>
-      <stop offset="1" stop-color="#416985" stop-opacity="0.85"/>
+      <stop offset="0" stop-color="#2F6BFF" stop-opacity="0.20"/>
+      <stop offset="1" stop-color="#2F6BFF" stop-opacity="1"/>
     </linearGradient>
-    <marker id="head" viewBox="0 0 12 12" refX="7" refY="6" markerWidth="16" markerHeight="16"
-            markerUnits="userSpaceOnUse" orient="auto">
-      <path d="M2 1.5 L8 6 L2 10.5" fill="none" stroke="#416985" stroke-opacity="0.85" stroke-width="2.4"
-            stroke-linecap="round" stroke-linejoin="round"/>
-    </marker>
   </defs>
   <rect width="660" height="360" fill="url(#wash)"/>
   <rect width="660" height="360" fill="url(#glow)"/>
-  <g font-family="-apple-system, 'SF Pro Text', Inter, 'Helvetica Neue', sans-serif" text-anchor="middle">
-    <text x="330" y="80" font-size="22" font-weight="600" fill="#1E2B36" letter-spacing="-0.2">Drag BoxCop to Applications</text>
+  <rect width="660" height="4" fill="#0A1730"/>
+  <g font-family="'Helvetica Neue', Helvetica, Arial, sans-serif" text-anchor="middle">
+    <text x="330" y="80" font-size="22" font-weight="bold" fill="#0A1730" letter-spacing="-0.2">Drag BoxCop to Applications</text>
   </g>
-  <path d="M268 204 Q330 168 392 204" fill="none" stroke="url(#trail)" stroke-width="3"
-        stroke-linecap="round" marker-end="url(#head)"/>
+  <path d="M268 204 Q330 168 392 204" fill="none" stroke="url(#trail)" stroke-width="3" stroke-linecap="round"/>
+  <!-- Arrowhead drawn as a path (not a marker) so every renderer draws it. -->
+  <path d="M381.5 195.5 L392.5 204 L379 208.5" fill="none" stroke="#2F6BFF" stroke-width="3"
+        stroke-linecap="round" stroke-linejoin="round"/>
 </svg>

@@ -1,0 +1,356 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>BoxCop: security for Macs that run AI agents</title>
+<meta name="description" content="One free Mac app that checks what agents install, contains what they run, and watches what leaves. Limited macOS beta. No account.">
+<meta name="color-scheme" content="light dark">
+<meta name="theme-color" content="#0E2147">
+<meta property="og:title" content="BoxCop">
+<meta property="og:description" content="Let your AI agents work. Keep your machine protected.">
+<meta property="og:type" content="website">
+<link rel="icon" href="assets/favicon.svg" type="image/svg+xml">
+<link rel="icon" href="assets/favicon-64.png" type="image/png" sizes="64x64">
+<link rel="apple-touch-icon" href="assets/apple-touch-icon.png">
+<link rel="stylesheet" href="styles.css">
+</head>
+<body>
+<a class="skip" href="#main">Skip to content</a>
+
+<div class="top">
+  <header class="nav wrap">
+    <a class="brand" href="#top" aria-label="BoxCop home">
+      <img src="assets/boxcop-mark.svg" alt="" width="34" height="34">
+      <span>BoxCop</span>
+    </a>
+    <nav aria-label="Sections">
+      <a href="#layers">Layers</a>
+      <a href="#triage">Triage</a>
+      <a href="#status">What works today</a>
+      <a href="https://github.com/LIT-Protocol/boxcop">GitHub</a>
+    </nav>
+    <a class="btn btn-small btn-gold" href="https://github.com/LIT-Protocol/boxcop/releases">Get the beta</a>
+  </header>
+
+  <main id="main">
+  <section class="hero wrap" id="top">
+    <p class="eyebrow"><span class="chip">Limited macOS beta</span> A beat cop for your computer</p>
+    <h1>Let your AI agents work. <span>Keep your machine protected.</span></h1>
+    <p class="lede">One free Mac app that checks what agents install, contains what they run, and watches what leaves.</p>
+    <div class="actions">
+      <a class="btn btn-gold" href="https://github.com/LIT-Protocol/boxcop/releases">Get the beta</a>
+      <a class="btn btn-ghost" href="#how">See how it works</a>
+    </div>
+    <p class="fine">macOS 14 or later, Apple silicon. No account.</p>
+  </section>
+
+  <!-- Illustration of the app's Events view. Sample data, built in HTML and CSS. -->
+  <div class="wrap stage">
+    <figure class="mock" aria-label="Illustration of the BoxCop Events view showing a blocked install and its explanation">
+      <div class="win">
+        <div class="win-bar" aria-hidden="true">
+          <i></i><i></i><i></i>
+          <b>BoxCop</b>
+        </div>
+        <div class="app-head">
+          <div class="app-id">
+            <img src="assets/boxcop-mark.svg" alt="" width="26" height="26">
+            <strong>BoxCop</strong>
+            <span class="pill pill-ok"><i></i>Protected</span>
+          </div>
+          <div class="tabs" aria-hidden="true">
+            <span class="on">Events</span><span>Protection</span><span>Help</span>
+          </div>
+        </div>
+        <div class="app-body">
+          <div class="events">
+            <p class="day">Today</p>
+            <div class="ev sel">
+              <span class="tag tag-block">Blocked</span>
+              <time>2:14 PM</time>
+              <p class="ev-t">Blocked install of a malicious npm package</p>
+              <p class="ev-s">boxcop-test-malware 1.0.0 · Install gate</p>
+            </div>
+            <div class="ev">
+              <span class="tag tag-block">Blocked</span>
+              <time>1:52 PM</time>
+              <p class="ev-t">Install script tried to reach an unapproved host</p>
+              <p class="ev-s">203.0.113.9 · Containment</p>
+            </div>
+            <div class="ev">
+              <span class="tag tag-hold">Held</span>
+              <time>11:30 AM</time>
+              <p class="ev-t">Held a command that reads SSH private keys</p>
+              <p class="ev-s">Codex · Agent checks</p>
+            </div>
+            <div class="ev">
+              <span class="tag tag-ok">Approved</span>
+              <time>10:07 AM</time>
+              <p class="ev-t">Approved once: delete the build output folder</p>
+              <p class="ev-s">Claude Code · Agent checks</p>
+            </div>
+            <p class="day">Yesterday</p>
+            <div class="ev">
+              <span class="tag tag-block">Blocked</span>
+              <time>4:41 PM</time>
+              <p class="ev-t">Blocked a connection to a threat-list host</p>
+              <p class="ev-s">node · Outbound control</p>
+            </div>
+          </div>
+          <div class="detail">
+            <div class="d-top">
+              <span class="tag tag-block">Blocked</span>
+              <span class="d-meta">Install gate · Today, 2:14 PM</span>
+            </div>
+            <h2 class="d-title">Blocked install of a malicious npm package</h2>
+            <p class="d-subject"><code>boxcop-test-malware@1.0.0</code></p>
+            <dl>
+              <div>
+                <dt>Why</dt>
+                <dd>This release is on the signed list of known malware that BoxCop checks before a package is downloaded.</dd>
+              </div>
+              <div>
+                <dt>What</dt>
+                <dd>npm asked the registry for this package. BoxCop refused the download. Nothing was written to disk, and the package's postinstall script never ran.</dd>
+              </div>
+              <div>
+                <dt>Who started it</dt>
+                <dd>
+                  <span class="chain">
+                    <span class="link">Claude Code</span>
+                    <span class="arrow" aria-hidden="true">→</span>
+                    <span class="link"><code>npm install</code></span>
+                    <span class="arrow" aria-hidden="true">→</span>
+                    <span class="link link-stop">postinstall script</span>
+                  </span>
+                  <span class="chain-note">Stopped before the last step.</span>
+                </dd>
+              </div>
+              <div>
+                <dt>Next steps</dt>
+                <dd>
+                  <ul>
+                    <li>No cleanup is needed. The package is not on this Mac.</li>
+                    <li>Ask the agent to use a different package or an earlier release.</li>
+                  </ul>
+                </dd>
+              </div>
+            </dl>
+            <div class="d-actions" aria-hidden="true">
+              <span class="fake-btn">Copy details</span>
+            </div>
+          </div>
+        </div>
+      </div>
+      <figcaption>Illustration of the Events view with sample data. Every block says why it happened, what was stopped, who started it and what to do next.</figcaption>
+    </figure>
+  </div>
+</div>
+
+<section class="band problem" id="how">
+  <div class="wrap narrow">
+    <p class="kicker">The problem</p>
+    <p class="big">An AI agent on your Mac runs with your full access. So does everything it installs, downloads or writes.</p>
+    <p class="body">That Mac holds your credentials, private files, logged-in browser sessions and work data. One compromised package or one hostile web page is enough to put all of it within reach. Most people will never read the scripts their agents run, and they should not have to.</p>
+  </div>
+</section>
+
+<section class="band" id="layers">
+  <div class="wrap">
+    <p class="kicker">Six layers</p>
+    <h2 class="h">What can go wrong, and what stops it</h2>
+    <p class="sub">Each layer answers one risk. The descriptions below cover what the beta does now. The <a href="#status">status table</a> lists the limits.</p>
+    <ol class="layers">
+      <li>
+        <span class="num">1</span>
+        <p class="risk"><b>Risk</b> An agent installs something malicious, such as a compromised npm or PyPI release or a fake skill.</p>
+        <h3>Install gate</h3>
+        <p>A local registry firewall checks each npm and PyPI download against a signed malware list and refuses listed releases. Skill and instruction files are checked for known bad patterns.</p>
+      </li>
+      <li>
+        <span class="num">2</span>
+        <p class="risk"><b>Risk</b> Allowed code behaves badly when it runs, such as an install script that sends your credentials out.</p>
+        <h3>Containment</h3>
+        <p>npm dependency install scripts run in a sandbox. Their network access goes through a local allowlist, and they cannot write to your shell or npm configuration. This works without knowing the package is bad.</p>
+      </li>
+      <li>
+        <span class="num">3</span>
+        <p class="risk"><b>Risk</b> Data leaves through any app on the machine, such as a connection to a malware host.</p>
+        <h3>Outbound control</h3>
+        <p>A network extension records each app's new connections with the process and its signing identity, and blocks hosts on a threat list.</p>
+      </li>
+      <li>
+        <span class="num">4</span>
+        <p class="risk"><b>Risk</b> An agent is steered by hostile content in a web page, document, email or tool result.</p>
+        <h3>Agent checks</h3>
+        <p>Hooks in Claude Code, Codex and Cursor hold recognizable credential access, exfiltration and dangerous commands before they run. BoxCop does not detect the injection itself. It checks what the agent tries to do next.</p>
+      </li>
+      <li>
+        <span class="num">5</span>
+        <p class="risk"><b>Risk</b> The machine is already weak, with outdated runtimes and apps.</p>
+        <h3>Machine health</h3>
+        <p>BoxCop inventories apps, Homebrew, Python, npm and runtimes, shows reviewed findings, and walks you through the fix for the ones it can update.</p>
+      </li>
+      <li>
+        <span class="num">6</span>
+        <p class="risk"><b>Risk</b> Too many alerts, so the user turns everything off.</p>
+        <h3>Smart triage</h3>
+        <p>A model that runs on your Mac explains held actions in plain language and reviews linked activity. It can add caution. It cannot grant access.</p>
+      </li>
+    </ol>
+  </div>
+</section>
+
+<section class="band alt" id="triage">
+  <div class="wrap">
+    <p class="kicker">Smart triage</p>
+    <h2 class="h">Quiet by default</h2>
+    <p class="sub">Sandboxing everything breaks things. Prompting for everything teaches people to click Allow. BoxCop saves heavy protection for what is new or suspicious and lets ordinary work run.</p>
+    <ol class="steps">
+      <li>
+        <span class="step-n">Step 1</span>
+        <h3>Deterministic signals decide most cases</h3>
+        <p>Known-bad is blocked. Long-used, signed software runs normally. Something counts as new when it is first seen on this Mac, recently published, unsigned, just downloaded, or written by an agent in this session.</p>
+      </li>
+      <li>
+        <span class="step-n">Step 2</span>
+        <h3>New things are contained by default</h3>
+        <p>They run inside the containment layer with a narrow allowlist. No model is involved in this step.</p>
+      </li>
+      <li>
+        <span class="step-n">Step 3</span>
+        <h3>A local model reviews what is left</h3>
+        <p>It reads the script or package and the chain that led to it, explains the event, and recommends allow, keep contained or block.</p>
+      </li>
+    </ol>
+    <div class="rule">
+      <svg viewBox="-70 -10 140 150" width="46" height="50" aria-hidden="true"><path d="M0 14C-22 14-40 8-54 0V52C-54 88-32 112 0 126 32 112 54 88 54 52V0C40 8 22 14 0 14Z" fill="#FFC53D" stroke="#0A1730" stroke-width="10" stroke-linejoin="round"/><path d="M0 34 9.4 55 32 57.6 15 73 20 95.5 0 84 -20 95.5 -15 73 -32 57.6 -9.4 55Z" fill="#0A1730"/></svg>
+      <div>
+        <h3>The rule: AI may tighten protection on its own. It may never loosen it.</h3>
+        <p>The model reads text that an attacker may have written, so a prompt injection must not be able to grant access. Loosening a protection takes a decision from you. If the model is unavailable, steps 1 and 2 still apply.</p>
+      </div>
+    </div>
+    <p class="note"><b>Where the beta is.</b> This is the design. Today, known-bad packages and hosts are blocked, containment applies to npm install scripts, and the model advises without choosing which protections apply. Containing all new code by default is not built yet.</p>
+  </div>
+</section>
+
+<section class="band" id="one-app">
+  <div class="wrap">
+    <p class="kicker">One install</p>
+    <h2 class="h">One app instead of six tools</h2>
+    <p class="sub">Good defenses exist for each piece of this problem. Each is a separate tool with its own setup, updates and alert style, and most assume a security-minded developer.</p>
+    <div class="compare">
+      <div class="col col-them">
+        <h3>What people install today</h3>
+        <ul>
+          <li><b>Package firewall</b><span>blocks malicious packages at install</span></li>
+          <li><b>Sandbox runner</b><span>restricts a command's network and files</span></li>
+          <li><b>Per-app firewall</b><span>controls outbound connections</span></li>
+          <li><b>Agent hooks and scanners</b><span>check agent actions and skills</span></li>
+          <li><b>Vulnerability scanner</b><span>finds outdated software</span></li>
+          <li><b>Secret and injection checkers</b><span>look for leaked keys and hostile prompts</span></li>
+        </ul>
+        <p class="tally">Six installs. Six configurations. Six kinds of alert.</p>
+      </div>
+      <div class="col col-us">
+        <h3><img src="assets/boxcop-mark.svg" alt="" width="30" height="30"> BoxCop</h3>
+        <ul>
+          <li><b>One install</b><span>One permission flow, and one place to see what was blocked.</span></li>
+          <li><b>Layers share context</b><span>BoxCop can tell you that a blocked connection came from an install script that an agent started. Separate tools cannot know that.</span></li>
+          <li><b>Plain-language explanations</b><span>Each block says why, what, who started it and what to do next.</span></li>
+          <li><b>Defaults that need no config file</b><span>Written for people who will never read a script.</span></li>
+        </ul>
+        <p class="tally">Five of the six categories are in the beta, each with limits listed below. Secret and prompt-injection checks are planned and not built.</p>
+      </div>
+    </div>
+  </div>
+</section>
+
+<section class="band alt" id="local">
+  <div class="wrap">
+    <p class="kicker">Privacy</p>
+    <h2 class="h">Local first</h2>
+    <ul class="facts">
+      <li><h3>No account</h3><p>Download it and run it. There is no sign-up, token or enrollment.</p></li>
+      <li><h3>Nothing uploaded by default</h3><p>BoxCop does not send your source, secrets, shell history or browsing anywhere.</p></li>
+      <li><h3>A local model</h3><p>Triage runs on your Mac. What the model reads stays on your Mac.</p></li>
+      <li><h3>Your data stays put</h3><p>Events, history and settings live in one folder on your Mac.</p></li>
+    </ul>
+  </div>
+</section>
+
+<section class="band" id="status">
+  <div class="wrap">
+    <p class="kicker">Limited macOS beta</p>
+    <h2 class="h">What works today</h2>
+    <p class="sub">BoxCop is a limited macOS beta. This table is the current state of each layer, including what it does not do. The app shows "Protected" only for layers that are enforcing.</p>
+    <div class="table-wrap">
+      <table class="status">
+        <thead>
+          <tr><th scope="col">Layer</th><th scope="col">Built today</th><th scope="col">Current limits</th></tr>
+        </thead>
+        <tbody>
+          <tr>
+            <th scope="row">1. Install gate</th>
+            <td data-label="Built today">Local registry firewall that blocks listed malicious npm and PyPI releases using a signed malware feed. Opt-in routing for npm and pnpm. Skill and instruction-file checks.</td>
+            <td data-label="Current limits">No minimum release age. No pip or uv routing in the app. No checks for MCP servers or editor extensions. Skill checks match a narrow set of patterns.</td>
+          </tr>
+          <tr>
+            <th scope="row">2. Containment</th>
+            <td data-label="Built today">npm dependency install scripts run sandboxed. Network goes through a local allowlist proxy. Writes to shell and npm configuration are denied. Blocks are reported with the package and the agent.</td>
+            <td data-label="Current limits">npm install scripts only. Nothing yet for agent-written scripts, downloaded programs, MCP servers, pnpm, Yarn or Python.</td>
+          </tr>
+          <tr>
+            <th scope="row">3. Outbound control</th>
+            <td data-label="Built today">Network extension that records each app's new connections with process and signing identity, and blocks hostnames on a bundled threat list.</td>
+            <td data-label="Current limits">Exact-host reputation only. No per-app rules. No inspection of request contents or secrets. The list updates only with app releases.</td>
+          </tr>
+          <tr>
+            <th scope="row">4. Agent checks</th>
+            <td data-label="Built today">Pre-action hooks for Claude Code, Codex and Cursor that hold recognizable credential access, exfiltration and dangerous commands. Optional approval inbox for sends and spending, confirmed with Mac authentication.</td>
+            <td data-label="Current limits">Hooks are cooperative: an effect hidden inside a script can get past them. No coverage of desktop agent apps. No prompt-injection detection.</td>
+          </tr>
+          <tr>
+            <th scope="row">5. Machine health</th>
+            <td data-label="Built today">Automatic inventory of apps, Homebrew, Python, npm and runtimes with reviewed findings. Guided updates for a small number of packages.</td>
+            <td data-label="Current limits">Findings are hand-reviewed, not general CVE coverage. No checks of runtimes embedded in apps. No scan for plaintext secrets.</td>
+          </tr>
+          <tr>
+            <th scope="row">6. Smart triage</th>
+            <td data-label="Built today">A local model that explains held actions and reviews linked activity, citing what it found.</td>
+            <td data-label="Current limits">Advisory only. It does not yet choose which protections apply.</td>
+          </tr>
+        </tbody>
+      </table>
+    </div>
+    <p class="note">BoxCop covers what it launches or routes, not every process on the Mac. Like any security tool, it can miss things and it can be wrong about a block. An open-source release is planned; the repository is private for now.</p>
+  </div>
+</section>
+
+<section class="band pricing" id="pricing">
+  <div class="wrap narrow">
+    <p class="kicker">Pricing</p>
+    <p class="big">Free for individuals, with all six layers.</p>
+    <p class="body">A paid control plane for organizations is planned.</p>
+    <div class="actions">
+      <a class="btn btn-gold" href="https://github.com/LIT-Protocol/boxcop/releases">Get the beta</a>
+    </div>
+    <p class="fine">macOS 14 or later, Apple silicon. No account.</p>
+  </div>
+</section>
+</main>
+
+<footer class="foot">
+  <div class="wrap">
+    <a class="brand" href="#top" aria-label="BoxCop home">
+      <img src="assets/boxcop-mark.svg" alt="" width="30" height="30">
+      <span>BoxCop</span>
+    </a>
+    <p>Built by Lit Protocol</p>
+    <a href="https://github.com/LIT-Protocol/boxcop">GitHub</a>
+    <p class="yr">2026</p>
+  </div>
+</footer>
+</body>
+</html>

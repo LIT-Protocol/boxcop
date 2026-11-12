@@ -1,69 +1,75 @@
-# Signed macOS builds in GitHub Actions
+# Signing credentials in GitHub Actions
 
-The `macOS app` workflow produces a signed, notarized **distribution** build (beta channel) on pushes
-to `main` and explicit manual runs. Pull requests produce ad-hoc limited development builds without
-signing credentials. Manual runs use the selected branch; only dispatch trusted
-source. This build workflow uploads the DMG and evidence as Actions artifacts. The separate
-manual [Release BoxCop workflow](releasing.md) publishes GitHub Releases and signed
-Sparkle update feeds from `main`.
+Ordinary CI (`.github/workflows/ci.yml`) uses no signing secrets. It runs the
+Python tests on Linux and, on a GitHub-hosted Mac, the Swift tests, an ad-hoc
+signed limited-development build and the first-launch smoke test. The DMG and
+build evidence are uploaded as the `BoxCop-limited-development-arm64` artifact.
 
-The workflow imports the Developer ID identity into a temporary keychain, supplies
-both profiles, invokes `build.sh`, and verifies signatures, notarization/stapling,
-Gatekeeper and first-launch consent behavior. It does not activate the network
-extension or qualify live filtering. Local and CI builds default to the same
-Unix-timestamp extension build version scheme, so later builds can replace earlier
-installations from either source.
-`BOXCOP_EXTENSION_VERSION` can override it with an increasing positive integer.
+Only the manual [Release BoxCop workflow](releasing.md) signs. This page describes
+how it handles the credentials. The secrets themselves are listed in
+[releasing.md](releasing.md#required-secrets). They are not configured yet; until
+they are, the workflow stops at its first step and names what is missing.
 
-The [first signed CI run](https://github.com/Ember-Sovereignty/BoxCop/actions/runs/41533356828)
-passed on November 2, 2026: app/DMG signing, notarization and stapling, Gatekeeper,
-launch smoke and credential cleanup. All six secrets are configured. The
-[recorded build evidence](../artifacts/boxcop-protected-ci-build-v1.json) identifies
-the source commit and DMG digest. This run used the PR branch; automatic signed
-builds on `main` start after the workflow change is merged.
+## What `ci_signing.py` does
 
-## Repository secrets
+`desktop/macos/scripts/ci_signing.py` has three commands and runs only on a GitHub
+Actions runner.
 
-Configure these in the `BoxCop` repository under Settings → Secrets and
-variables → Actions:
+- `check` reports which required secrets are missing, by name, and fails if any
+  are. It runs before any build work.
+- `install` creates a temporary keychain with a random password under
+  `$RUNNER_TEMP/boxcop-signing`, imports the certificate, writes both provisioning
+  profiles there with mode 0600, stores the notarization credentials in that
+  keychain under the profile name `boxcop-ci`, and deletes the decoded
+  certificate file. It then exports the paths `build.sh` needs
+  (`BOXCOP_KEYCHAIN_PATH`, `BOXCOP_NOTARY_PROFILE`, `BOXCOP_APP_PROFILE`,
+  `BOXCOP_NETWORK_PROFILE`, `BOXCOP_SIGNING_IDENTITY`) to later steps.
+- `cleanup` restores the original keychain search list and deletes the temporary
+  keychain and directory. The workflow runs it in an `always()` step.
 
-| Secret | Value |
-| --- | --- |
-| `BOXCOP_CERTIFICATE_BASE64` | Base64 of the password-encrypted PKCS#12 export of the Developer ID Application certificate **and private key** |
-| `BOXCOP_CERTIFICATE_PASSWORD` | Export password |
-| `BOXCOP_APP_PROFILE_BASE64` | Base64 of `Allay_Developer_ID.provisionprofile` |
-| `BOXCOP_NETWORK_PROFILE_BASE64` | Base64 of `Allay_Network_Developer_ID.provisionprofile` |
-| `BOXCOP_NOTARY_APPLE_ID` | Apple ID email used for notarization |
-| `BOXCOP_NOTARY_PASSWORD` | Apple app-specific password for notarization |
+The team ID and certificate fingerprint come from the `BOXCOP_TEAM_ID` and
+`BOXCOP_SIGNING_IDENTITY` secrets. Nothing about the signing identity is
+hard-coded in the repository. The build separately verifies that the selected
+certificate is one of the certificates inside each provisioning profile.
 
-The current team is `QWER3PMRVZ`; the expected signing fingerprint is
-`8D5650DE08B51DDACD873C92D767F43B4654AFA6`. On certificate rotation, update these
-public identifiers in `desktop/macos/scripts/ci_signing.py`, regenerate both
-profiles for the new certificate, and replace the relevant secrets together.
-Missing secrets fail the signed build; there is no unsigned fallback.
+## Handling rules
 
-The canonical local credentials/configuration directory is `~/.sentinel-lab/`.
-Downloaded profiles live in `profiles/`; private CI transfer files belong in `ci/`
-with directory mode 0700 and file mode 0600. The original signing identity stays
-in Keychain. Do not commit credentials or put secret values in command arguments,
-logs, workflow inputs or artifacts. Upload with `gh secret set NAME` via standard
-input. A separate Apple app-specific password can be revoked independently from
-local notarization credentials.
+- Secret values are passed as environment variables only to the steps that need
+  them, never as command arguments or workflow inputs.
+- `ci_signing.py` captures the output of every credential command and reports
+  only the name of a failing tool. Error messages name missing secrets but never
+  include a value.
+- The credential directory is outside the directory that is uploaded as an
+  artifact.
+- Use a disposable runner. If a runner is killed mid-job, `cleanup` does not run.
+- There is no unsigned fallback. A missing or malformed secret fails the run.
 
-## Runner cleanup and artifacts
+## Preparing the secrets
 
-Secret environment variables are passed only to the credential installation step.
-`ci_signing.py` suppresses credential-command output, restores the original keychain
-search list and deletes the temporary keychain and profiles in an `always()` cleanup
-step. Artifacts include only named distribution/evidence files; the credential
-directory is outside the artifact directory. The runner must be disposable: a hard
-machine termination can prevent cleanup from executing.
+On the Mac that holds the Developer ID certificate, export the certificate and
+its private key from Keychain Access as a password-protected `.p12` file. Keep
+the transfer files in `~/.sentinel-lab/ci/` (directory mode 0700, files 0600),
+never in the repository. Upload each value through standard input so it does not
+enter shell history:
 
-`BOXCOP_KEYCHAIN_PATH` makes both the build preflight and notarization submissions
-use the temporary keychain explicitly. Ordinary local builds continue using the
-existing `sentinel-beta` Keychain profile.
+```sh
+base64 -i ~/.sentinel-lab/ci/identity.p12 | gh secret set BOXCOP_CERTIFICATE_BASE64 --repo LIT-Protocol/boxcop
+base64 -i ~/.sentinel-lab/profiles/Allay_Developer_ID.provisionprofile | gh secret set BOXCOP_APP_PROFILE_BASE64 --repo LIT-Protocol/boxcop
+base64 -i ~/.sentinel-lab/profiles/Allay_Network_Developer_ID.provisionprofile | gh secret set BOXCOP_NETWORK_PROFILE_BASE64 --repo LIT-Protocol/boxcop
+gh secret set BOXCOP_CERTIFICATE_PASSWORD --repo LIT-Protocol/boxcop   # prompts for the value
+```
 
-After a successful workflow, download `BoxCop-macOS-arm64` from the run's
-Artifacts section. Check `build-evidence.json` for profile `distribution`, channel `beta`, notarization
-`accepted_and_stapled` and signature verification `passed`. Interactive installation,
-filter approval and real receiver effects remain the [network release gates](outgoing-connections.md).
+Find the certificate fingerprint for `BOXCOP_SIGNING_IDENTITY` with
+`security find-identity -v -p codesigning`. Use a separate app-specific password
+for CI notarization so it can be revoked without affecting local builds.
+
+When the certificate is rotated, regenerate both provisioning profiles for the
+new certificate and replace the certificate, profile and fingerprint secrets
+together.
+
+## After a successful release run
+
+Check the release's `build-evidence.json` for profile `distribution`,
+notarization `accepted_and_stapled` and signature verification `passed`. CI does
+not activate the network extension. Installing the build, approving the filter
+and exercising each layer happen in the [VM lab](vm-lab.md).

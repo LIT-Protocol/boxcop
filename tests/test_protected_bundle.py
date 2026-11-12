@@ -43,6 +43,14 @@ def test_rejects_invalid_distribution_profiles(mutation):
     with pytest.raises(ValueError): module.validate_profile(data, 'network', IDENTITY)
 
 
+def test_bundle_identifiers_match_the_provisioning_profiles():
+    """The profiles BoxCop is signed with are bound to these identifiers; renaming needs new profiles."""
+    assert module.APP_ID == 'local.sentinel.endpoint'
+    assert module.NETWORK_ID == 'local.sentinel.endpoint.network-filter'
+    info = plistlib.loads((ROOT / 'desktop/macos/Resources/Info.plist').read_bytes())
+    assert info['CFBundleIdentifier'] == module.APP_ID
+
+
 def test_missing_profiles_fail_before_decoding():
     with pytest.raises(ValueError, match='app and network'):
         module.load_profiles({'app': None, 'network': None}, IDENTITY)
@@ -51,7 +59,8 @@ def test_missing_profiles_fail_before_decoding():
 def test_bundle_has_only_network_extension_and_matching_version(tmp_path):
     bundle = tmp_path / 'BoxCop.app'
     (bundle / 'Contents').mkdir(parents=True)
-    (bundle / 'Contents/Info.plist').write_bytes(plistlib.dumps({'CFBundleIdentifier': module.APP_ID}))
+    (bundle / 'Contents/Info.plist').write_bytes(plistlib.dumps({'CFBundleIdentifier': module.APP_ID,
+                                                                  'CFBundleShortVersionString': '1.2.3'}))
     native = tmp_path / 'native'; native.write_bytes(b'native-fixture')
     network = tmp_path / 'network'; network.write_bytes(b'network-fixture')
     profiles = {}
@@ -62,8 +71,16 @@ def test_bundle_has_only_network_extension_and_matching_version(tmp_path):
     extensions = list((bundle / 'Contents/Library/SystemExtensions').iterdir())
     assert len(extensions) == 1
     info = plistlib.loads((extensions[0] / 'Contents/Info.plist').read_bytes())
-    assert info['BoxCopNetworkMode'] == 'standalone'
-    assert info['NSSystemExtensionUsageDescription'].strip()
+    # The filter always runs standalone; no mode key is needed or read.
+    assert 'BoxCopNetworkMode' not in info
+    assert 'BoxCopNetworkMode' not in (ROOT / 'desktop/macos/Sources/BoxCopNetworkFilter/main.swift').read_text()
+    assert info['CFBundleName'] == info['CFBundleDisplayName'] == 'BoxCop Network Filter'
+    assert info['CFBundleShortVersionString'] == '1.2.3'
+    assert info['NSSystemExtensionUsageDescription'].startswith('BoxCop records new outgoing connections')
+    provider = info['NetworkExtension']['NEProviderClasses']['com.apple.networkextension.filter-data']
+    # The system instantiates the provider by this Objective-C name.
+    swift = (ROOT / 'desktop/macos/Sources/BoxCopNetworkFilter/main.swift').read_text()
+    assert provider == 'BoxCopFilterDataProvider' and f'@objc({provider})' in swift
     assert plistlib.loads((bundle / 'Contents/Info.plist').read_bytes())['NSSystemExtensionUsageDescription'].strip()
     assert info['CFBundleVersion'] == '42'
     assert info['CFBundleIdentifier'] == module.NETWORK_ID

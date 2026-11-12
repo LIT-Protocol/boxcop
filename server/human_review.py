@@ -1,4 +1,4 @@
-"""Local cooperative hook review. Same-user state is not a security boundary."""
+"""Local approval inbox for agent actions. Same-user state is not a security boundary."""
 from contextlib import contextmanager
 import fcntl
 import hashlib
@@ -14,8 +14,7 @@ import uuid
 from .host_agents import atomic, private_directory, read_object
 from .communication_commands import external_communication
 
-# Keep the retired destructive field for persisted and team wire compatibility.
-# It no longer triggers review, even when older settings have it enabled.
+# `destructive` is a retired field the app still sends. It never triggers review.
 DEFAULT_POLICIES = {'external': False, 'destructive': False, 'spending': False,
                     'threshold_cents': 2500, 'currency': 'usd'}
 TTL = 900
@@ -45,35 +44,6 @@ def validate_policies(value):
     if value['currency'] != 'usd':
         raise ValueError('Only USD thresholds are supported')
     return value
-
-
-def effective_policies(directory, value):
-    """Read the atomically cached team policy without network I/O or enrollment locks.
-
-    Keep cached locks on revocation/offline, like the existing team app settings.
-    Explicit leave removes enrollment and restores the member's saved preferences.
-    """
-    from .team.reporter import Enrollment
-    from .team.desktop import validate_policy
-    enrollment = Enrollment(Path(directory))
-    managed = None
-    binding = None
-    policies = value['policies']
-    if enrollment.exists():
-        team = enrollment.load()  # Corrupt enrolled state fails closed.
-        if team.get('mode') == 'team':
-            policy = validate_policy(team['policy'])
-            if 'review' in policy:
-                policies = policy['review']
-                managed = team['organization']['name']
-                binding = {'organization': team['organization'], 'device': team.get('device'),
-                           'revision': policy['revision'], 'review': policies}
-    if value.get('team_binding') != binding:
-        for row in value['requests']:
-            if row['status'] in ('pending', 'approved'):
-                row['status'] = 'expired'
-        value['team_binding'] = binding
-    return policies, managed
 
 
 @contextmanager
@@ -130,13 +100,13 @@ def reasons(event, policies):
 def gate(directory, event, payload):
     """Return permission; approval is reserved atomically before a hook can allow."""
     with state(directory) as value:
-        policies, _ = effective_policies(directory, value)
+        policies = value['policies']
         matched = reasons(event, policies)
         if not matched:
             return True, None
         # Transport IDs change on retry; bind action arguments and reported context.
         action_input = {k: payload[k] for k in ('tool_name', 'tool_input', 'command', 'cwd', 'session_id', 'conversation_id', 'hook_event_name') if k in payload}
-        binding = {'event': event, 'payload': action_input, 'policies': policies, 'team': value.get('team_binding')}
+        binding = {'event': event, 'payload': action_input, 'policies': policies}
         digest = hashlib.sha256(json.dumps(binding, sort_keys=True, separators=(',', ':')).encode()).hexdigest()
         rows = value['requests']
         row = next((r for r in reversed(rows) if r['digest'] == digest and r['status'] in ('pending', 'approved', 'rejected')), None)
@@ -167,13 +137,11 @@ def gate(directory, event, payload):
 
 def resolve(directory, identifier, approve, reviewer):
     with state(directory) as value:
-        effective_policies(directory, value)
         row = next(r.copy() for r in value['requests'] if r['id'] == identifier and r['status'] == 'pending')
     # Native review/authentication happens without holding the hook storage lock.
     if approve and not reviewer(row):
         raise ValueError('Approval cancelled')
     with state(directory) as value:
-        effective_policies(directory, value)
         current = next(r for r in value['requests'] if r['id'] == identifier)
         if current != row or current['status'] != 'pending':
             raise ValueError('Request changed or expired')
@@ -243,7 +211,6 @@ def explain(directory, runtime=None, models=None):
     """Summarize pending requests without holding the hook lock during inference."""
     models = Path(models) if models else Path(directory) / 'models' / 'workflow'
     with state(directory) as value:
-        effective_policies(directory, value)
         pending = [r.copy() for r in value['requests'] if r['status'] == 'pending']
     with summaries(directory) as cached:
         todo = [r for r in pending if r['id'] not in cached]
@@ -286,9 +253,6 @@ def main(args):
         if op == 'configure' and set(request) == {'op', 'policies'}:
             policies = validate_policies(request['policies'])
             with state(options.data_dir) as value:
-                _, managed = effective_policies(options.data_dir, value)
-                if managed is not None:
-                    raise ValueError('Team manages review policies')
                 if policies != value['policies']:
                     value['policies'] = policies
                     for row in value['requests']:
@@ -301,10 +265,7 @@ def main(args):
         elif request != {'op': 'status'}:
             raise ValueError('Invalid operation')
         with state(options.data_dir) as value:
-            policies, managed = effective_policies(options.data_dir, value)
             result = json.loads(json.dumps(value))
-            result['policies'] = policies
-            result['managed_by'] = managed
         ids = {r['id'] for r in result['requests']}
         with summaries(options.data_dir) as cached:
             for key in [k for k in cached if k not in ids]:

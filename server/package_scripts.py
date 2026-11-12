@@ -30,6 +30,7 @@ import threading
 import time
 from urllib.parse import parse_qs, urlsplit
 
+from .event_log import EventLog, private_directory
 from .package_intelligence import atomic_write, canonical
 from .package_routing import read_config
 
@@ -37,6 +38,7 @@ BEGIN = '# BEGIN BOXCOP INSTALL SCRIPT PROTECTION'
 END = '# END BOXCOP INSTALL SCRIPT PROTECTION'
 PORT = 8795
 REGISTRY_PORT = 8794
+CONTAINMENT_LOG = 'blocked-connections.json'
 SANDBOX = '/usr/bin/sandbox-exec'
 HOST = re.compile(r'(?=.{1,253}$)[a-z0-9]([a-z0-9-]{0,61}[a-z0-9])?(\.[a-z0-9]([a-z0-9-]{0,61}[a-z0-9])?)+')
 PACKAGE = re.compile(r'(?=.{1,214}$)(@[a-z0-9~][a-z0-9._~-]*/)?[a-z0-9~][a-z0-9._~-]*')
@@ -225,9 +227,12 @@ def initiator(pid):
 
 class Guard:
     """Destination decisions for contained scripts. Thread-safe; bounded memory."""
-    def __init__(self, directory, *, allow_private=False, ports=(80, 443)):
+    error = 'BOXCOP_INSTALL_SCRIPT_NETWORK'
+    refusal = 'BoxCop blocked this destination for package install scripts. Approve it in BoxCop if it is expected.'
+
+    def __init__(self, directory, *, allow_private=False, ports=(80, 443), log=None):
         self.path = Path(directory) / 'exceptions.json'
-        self.allow_private, self.ports = allow_private, ports
+        self.allow_private, self.ports, self.log = allow_private, ports, log
         self.lock = threading.Lock()
         self.runs = OrderedDict()
         self.blocked = deque(maxlen=50)
@@ -272,11 +277,16 @@ class Guard:
         script = (run.get('event') or 'install') + ' script'
         subject = (f"{run['agent']} started an install of {name}, whose {script}" if run.get('agent') and name
                    else f"The {script} of {name}" if name else 'A package install script')
+        message = (f'{subject} tried to connect to {host or "an unnamed destination"}. BoxCop blocked the connection because '
+                   'package install scripts can only reach approved destinations.')
         self.blocked.appendleft(dict(key=key, id=secrets.token_hex(8), time=datetime.now(timezone.utc).isoformat(timespec='seconds'),
             package=run.get('package'), package_version=run.get('version'), event=run.get('event'), agent=run.get('agent'),
-            project=run.get('project'), host=host, port=port, count=1,
-            message=f'{subject} tried to connect to {host or "an unnamed destination"}. BoxCop blocked the connection because '
-                    'package install scripts can only reach approved destinations.'))
+            project=run.get('project'), host=host, port=port, count=1, message=message))
+        if self.log is not None:
+            # Durable copy for the activity list: names and hosts only.
+            self.log.append(dict(kind='script', package=run.get('package'), package_version=run.get('version'),
+                                 agent=run.get('agent'), host=host, port=port, message=message),
+                            repeat_of='|'.join(str(part) for part in ('script', *key)))
 
     def change(self, action, package, host):
         host = host.lower().rstrip('.')
@@ -335,7 +345,7 @@ class ProxyHandler(BaseHTTPRequestHandler):
             return None
 
     def _refuse(self, status, message):
-        body = canonical({'error': 'BOXCOP_INSTALL_SCRIPT_NETWORK', 'message': message})
+        body = canonical({'error': self.server.guard.error, 'message': message})
         self.send_response(status)
         self.send_header('Content-Type', 'application/json')
         self.send_header('Content-Length', str(len(body)))
@@ -346,13 +356,13 @@ class ProxyHandler(BaseHTTPRequestHandler):
         """Decide, then connect. Returns a socket holding one server slot, or None."""
         guard = self.server.guard
         if not self.server.slots.acquire(blocking=False):
-            self._refuse(503, 'BoxCop install-script proxy is busy')
+            self._refuse(503, 'The BoxCop proxy is busy')
             return None
         upstream = None
         try:
             allowed, _ = guard.decide(self._token(), host, port)
             if not allowed:
-                self._refuse(403, 'BoxCop blocked this destination for package install scripts. Approve it in BoxCop if it is expected.')
+                self._refuse(403, guard.refusal)
                 return None
             try:
                 upstream = socket.create_connection((guard.address(host, port), port), timeout=15)
@@ -533,7 +543,7 @@ class ScriptRuntime:
     def _enable(self):
         if not self.available():
             raise ValueError('Install-script protection needs the macOS sandbox, which is unavailable here')
-        self.directory.mkdir(parents=True, exist_ok=True, mode=0o700)
+        private_directory(self.directory)
         # Rewritten on every start so an app update refreshes both files.
         atomic_write(self.directory / 'profile.sb', profile(self.home, self.directory, self.port).encode())
         # Executable before it is renamed into place: npm may run it at any moment.
@@ -544,7 +554,8 @@ class ScriptRuntime:
             os.fchmod(stream.fileno(), 0o755)
         os.replace(temporary, self.shell)
         if self.proxy is None:
-            guard = Guard(self.directory, allow_private=self.allow_private, ports=self.ports)
+            guard = Guard(self.directory, allow_private=self.allow_private, ports=self.ports,
+                          log=EventLog(self.directory / CONTAINMENT_LOG))
             proxy = ProxyServer(guard, self.port)
             try:
                 control = ControlServer(guard, self.directory / 'control.sock', self.initiator)

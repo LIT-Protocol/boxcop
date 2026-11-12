@@ -64,7 +64,7 @@ public enum SoftwareAgentInstructions {
             """)
         }
         sections.append("""
-        Finish by checking the actual installed and selected runtime/app versions, project tests where applicable, remaining old copies and running consumers. Ask me to run BoxCop's Recheck software. Report what changed, what was tested, what remains unresolved, and any restoration steps. Do not claim the Mac is secure merely because these findings disappeared. You have no blanket permission to delete projects, remove software, weaken security settings, or change unrelated installations.
+        Finish by checking the actual installed and selected runtime/app versions, project tests where applicable, remaining old copies and running consumers. Ask me to choose Check now on BoxCop's Health page. Report what changed, what was tested, what remains unresolved, and any restoration steps. Do not claim the Mac is secure merely because these findings disappeared. You have no blanket permission to delete projects, remove software, weaken security settings, or change unrelated installations.
 
         BoxCop scan evidence (JSON):
         \(evidence)

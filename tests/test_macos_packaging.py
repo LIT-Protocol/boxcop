@@ -40,9 +40,22 @@ def test_bundle_metadata_has_real_native_lifecycle_and_no_elevated_permissions()
     assert data["CFBundlePackageType"] == "APPL"
     assert data["LSUIElement"] is True
     assert data["LSMinimumSystemVersion"] == "14.0"
-    assert "NSScreenCaptureUsageDescription" not in data
-    assert "NSMicrophoneUsageDescription" not in data
-    assert "NSCameraUsageDescription" not in data
+    assert data["CFBundleName"] == data["CFBundleDisplayName"] == "BoxCop"
+    assert data["CFBundleIconFile"] == "BoxCop"
+    assert (MAC / "Resources" / "BoxCop.icns").is_file()
+    # BoxCop needs no privacy permission: nothing records the screen, input or other apps.
+    assert not [key for key in data if key.startswith("NS") and key.endswith("UsageDescription")]
+    # No custom URL scheme: there are no invitations or deep links.
+    assert "CFBundleURLTypes" not in data
+
+
+def test_checked_in_metadata_names_no_update_feed():
+    """BoxCop has no update feed yet; a build gets one only from explicit release input."""
+    data = plistlib.loads((MAC / "Resources" / "Info.plist").read_bytes())
+    assert "SUFeedURL" not in data and "SUPublicEDKey" not in data
+    # The safe Sparkle settings stay, so a configured feed is always verified.
+    assert data["SURequireSignedFeed"] is True and data["SUVerifyUpdateBeforeExtraction"] is True
+    assert data["SUAutomaticallyUpdate"] is False
 
 
 def test_child_environment_drops_import_injection_and_development_overrides():
@@ -144,41 +157,135 @@ def test_build_runtime_dependencies_are_hash_locked_and_small():
         assert unnecessary not in text
 
 
-def test_fresh_checkout_build_always_provisions_classifier(tmp_path, monkeypatch):
+def engine_tree(tmp_path, modules, pins=("pydantic==2.0.0 \\",)):
+    """A small fake checkout: server/ and tools/ sources plus requirement pins."""
+    root = tmp_path / "checkout"
+    for name, source in modules.items():
+        path = root / name
+        path.parent.mkdir(parents=True, exist_ok=True)
+        path.write_text(source)
+    (root / "server/assets").mkdir(parents=True, exist_ok=True)
+    mac = tmp_path / "mac"
+    mac.mkdir()
+    (mac / "requirements-build.txt").write_text("\n".join(pins) + "\n")
+    (mac / "requirements-packages.txt").write_text("")
+    return root, mac
+
+
+def test_engine_imports_follow_lazy_relative_and_namespace_imports(tmp_path):
     builder = load_builder()
-    monkeypatch.setattr(builder, 'ROOT', tmp_path / 'fresh-checkout')
-    calls = []
-    monkeypatch.setattr(builder, 'run', lambda command, **kwargs: calls.append(command))
-    work = tmp_path / 'build'
-    options = builder.prepare_classifier('python', work, {})
-    assert not (builder.ROOT / '.local/models/minilm').exists()
-    assert '--require-hashes' in calls[0]
-    assert calls[0][-1] == MAC / 'requirements-classifier.txt'
-    assert calls[1] == ['python', builder.ROOT / 'scripts/setup_model.py', '--model-dir', work / 'models/minilm']
-    assert str(work / 'models/minilm') + ':models/minilm' in options
-    for dependency in ('onnxruntime', 'tokenizers'):
-        assert dependency in options
+    root, _ = engine_tree(tmp_path, {
+        "server/__init__.py": "",
+        "server/desktop.py": "import json\nfrom . import store\nfrom .models import Row\n"
+                             "def lazy():\n    from tools.helper import run\n    import yaml\n",
+        "server/store.py": "import sqlite3\ntry:\n    import orjson\nexcept ImportError:\n    orjson = None\n",
+        "server/models.py": "from pydantic import BaseModel\n",
+        "server/unused.py": "import numpy\n",
+        "tools/helper.py": "import httpx\n",
+        "tools/publisher.py": "import boto3\n",
+    })
+    local, required, optional = builder.engine_imports(root)
+    assert local == {"server", "server.desktop", "server.store", "server.models", "tools", "tools.helper"}
+    # Modules the engine never imports do not add dependencies to the app.
+    assert required == {"pydantic", "yaml", "httpx"}
+    assert optional == {"orjson"}
 
 
-def test_failed_classifier_provisioning_cannot_make_rules_only_package(tmp_path, monkeypatch):
+def test_freeze_options_derive_from_engine_imports(tmp_path):
     builder = load_builder()
-    def fail_setup(command, **kwargs):
-        if '--model-dir' in command:
-            raise subprocess.CalledProcessError(1, command)
-    monkeypatch.setattr(builder, 'run', fail_setup)
-    with pytest.raises(subprocess.CalledProcessError):
-        builder.prepare_classifier('python', tmp_path, {})
+    root, mac = engine_tree(tmp_path, {
+        "server/__init__.py": "", "server/desktop.py": "from .models import Row\nimport yaml\n",
+        "server/models.py": "from pydantic import BaseModel\n",
+    }, pins=("pydantic==2.0.0 \\", "PyYAML==6.0 \\"))
+    options = builder.engine_freeze_options(root, mac)
+    assert options[:2] == ["--add-data", str(root / "server/assets") + ":server/assets"]
+    hidden = [options[index + 1] for index, value in enumerate(options) if value == "--hidden-import"]
+    assert hidden == ["pydantic", "server", "server.desktop", "server.models", "yaml"]
 
 
-@pytest.mark.parametrize('returncode,payload', [(1, {'ready': False}), (0, {'ready': False}), (0, {'ready': True})])
-def test_frozen_smoke_rejects_failed_or_incomplete_classifier_report(tmp_path, monkeypatch, returncode, payload):
+def test_unpinned_engine_dependency_stops_the_build(tmp_path):
+    """A module that imports fine in a developer venv must not be missing from the frozen engine."""
+    builder = load_builder()
+    root, mac = engine_tree(tmp_path, {"server/__init__.py": "", "server/desktop.py": "import yaml\nimport pydantic\n"})
+    with pytest.raises(builder.BuildError, match="not pinned.*yaml"):
+        builder.engine_freeze_options(root, mac)
+
+
+def test_checked_in_engine_freezes_from_pinned_requirements_only():
+    builder = load_builder()
+    options = builder.engine_freeze_options()
+    hidden = {options[index + 1] for index, value in enumerate(options) if value == "--hidden-import"}
+    assert "server.desktop" in hidden
+    # Removed with the clipboard classifier; they must not return to the bundle.
+    assert not hidden & {"onnxruntime", "tokenizers", "numpy", "huggingface_hub", "fastapi", "uvicorn"}
+    assert not any("models/minilm" in str(option) for option in options)
+    assert not list(MAC.glob("requirements-classifier.*"))
+
+
+def load_smoke():
     spec = importlib.util.spec_from_file_location('smoke_engine', MAC / 'scripts/smoke_engine.py')
     smoke = importlib.util.module_from_spec(spec)
     spec.loader.exec_module(smoke)
+    return smoke
+
+
+@pytest.mark.parametrize('returncode,output', [
+    (1, '{"ok": true, "schema": "boxcop.self-test.v1"}'), (0, '{"ok": false, "schema": "boxcop.self-test.v1"}'),
+    (0, '{"ok": true}'), (0, 'not json'), (0, ''),
+    (0, '{"ok": true, "schema": "boxcop.self-test.v1"}\n{"extra": 1}')])
+def test_frozen_smoke_rejects_failed_or_malformed_self_test(tmp_path, monkeypatch, returncode, output):
+    smoke = load_smoke()
     monkeypatch.setattr(smoke.subprocess, 'run', lambda *args, **kwargs:
-                        subprocess.CompletedProcess(args[0], returncode, json.dumps(payload), ''))
-    with pytest.raises(RuntimeError, match='classifier'):
-        smoke.smoke_classifier(tmp_path / 'engine', tmp_path, {})
+                        subprocess.CompletedProcess(args[0], returncode, output, ''))
+    with pytest.raises(RuntimeError, match='self-test'):
+        smoke.smoke_self_test(tmp_path / 'engine', tmp_path, {})
+
+
+def test_frozen_smoke_runs_the_engine_self_test_flag(tmp_path, monkeypatch):
+    smoke = load_smoke()
+    calls = []
+    def run(command, **kwargs):
+        calls.append(command)
+        return subprocess.CompletedProcess(command, 0, '{"ok": true, "schema": "boxcop.self-test.v1", "checks": 4}\n', '')
+    monkeypatch.setattr(smoke.subprocess, 'run', run)
+    assert smoke.smoke_self_test(tmp_path / 'engine', tmp_path, {})['checks'] == 4
+    assert calls == [[str(tmp_path / 'engine'), '--self-test']]
+
+
+@pytest.mark.parametrize('report', [
+    {"schema": "other", "package": {"configured": False, "routed": False, "listening": False}, "scripts": {"routed": False, "listening": False}},
+    {"schema": "boxcop.protection-status.v1", "package": {"configured": False, "routed": False}, "scripts": {"routed": False, "listening": False}},
+    {"schema": "boxcop.protection-status.v1", "package": {"configured": True, "routed": True, "listening": False}, "scripts": {"routed": False, "listening": False}},
+])
+def test_frozen_smoke_rejects_invalid_protection_status(tmp_path, monkeypatch, report):
+    smoke = load_smoke()
+    monkeypatch.setattr(smoke.subprocess, 'run', lambda *args, **kwargs:
+                        subprocess.CompletedProcess(args[0], 0, json.dumps(report), ''))
+    with pytest.raises(RuntimeError, match='protection status|routing'):
+        smoke.smoke_protection_status(tmp_path / 'engine', tmp_path, tmp_path, {})
+
+
+def test_source_engine_passes_the_same_smoke_as_the_frozen_one(tmp_path):
+    """The build runs this smoke against the frozen engine; run it here against the sources."""
+    smoke = load_smoke()
+    launcher = tmp_path / 'boxcop-engine'
+    launcher.write_text(f'#!/bin/sh\nexec {sys.executable!r} -I -B {str(MAC / "scripts/engine_entry.py")!r} "$@"\n')
+    launcher.chmod(0o755)
+    report = smoke.smoke(launcher, tmp_path / 'scratch')
+    assert report['self_test']['ok'] is True
+    assert report['protection_status']['schema'] == 'boxcop.protection-status.v1'
+
+
+def test_packaged_lab_switches_are_read_from_the_swift_sources(tmp_path):
+    builder = load_builder()
+    (tmp_path / 'App.swift').write_text('if a.contains("--dev-network-filter-enable") {}\n"--dev-interface-preview" "--status"')
+    assert builder.packaged_entrypoints_to_reject(tmp_path) == ['--dev-network-filter-enable']
+    (tmp_path / 'App.swift').write_text('"--status"')
+    assert builder.packaged_entrypoints_to_reject(tmp_path) == []
+    # Dropped lab services must not come back as command-line switches.
+    sources = ''.join(path.read_text(errors='replace') for path in (MAC / 'Sources').rglob('*.swift'))
+    for removed in ('--dev-endpoint-security-', '--dev-agent-run'):
+        assert removed not in sources
 
 
 def test_engine_launcher_does_not_start_http_or_import_model():
@@ -187,7 +294,6 @@ def test_engine_launcher_does_not_start_http_or_import_model():
     source = entry.read_text()
     assert "from server.desktop import main" in source
     assert "server.app" not in source
-    assert "server.semantic" not in source
     assert "uvicorn" not in source
 
 
@@ -390,14 +496,18 @@ def test_distribution_wrapper_requires_signing_and_notarization(tmp_path, case):
     if case == 'missing':
         identity_output = '  0 valid identities found\n'
     capture = tmp_path / 'arguments.json'
+    feed_capture = tmp_path / 'feed.json'
     scripts = {
         'date': '#!/bin/sh\nprintf "1793748000\\n"\n',
         'cmake': '#!/bin/sh\nexit 0\n',
         'uname': '#!/bin/sh\nprintf "Darwin\\n"\n',
         'security': '#!/bin/sh\ncat <<\'IDENTITIES\'\n' + identity_output + 'IDENTITIES\n',
         'xcrun': '#!/bin/sh\nexit ' + ('1' if case == 'notary_failure' else '0') + '\n',
-        'python3.12': f'#!{sys.executable}\nimport json,sys\nfrom pathlib import Path\n'
-                      f'if sys.argv[1] != "-c": Path({str(capture)!r}).write_text(json.dumps(sys.argv[1:]))\n',
+        'python3.12': f'#!{sys.executable}\nimport json,os,sys\nfrom pathlib import Path\n'
+                      f'feed = [os.environ.get("BOXCOP_PACKAGE_FEED_" + key) for key in ("URL", "PUBLIC_KEY_BASE64", "MINIMUM_SEQUENCE")]\n'
+                      f'if sys.argv[1] != "-c":\n'
+                      f'    Path({str(capture)!r}).write_text(json.dumps(sys.argv[1:]))\n'
+                      f'    Path({str(feed_capture)!r}).write_text(json.dumps(feed))\n',
     }
     for name, content in scripts.items():
         path = fake_bin / name
@@ -413,6 +523,9 @@ def test_distribution_wrapper_requires_signing_and_notarization(tmp_path, case):
     if case == 'stable': env['BOXCOP_CHANNEL'] = 'stable'
     if case == 'invalid_channel': env['BOXCOP_CHANNEL'] = 'other'
     if case == 'legacy_profile': env['BOXCOP_PROFILE'] = 'beta'
+    if case == 'custom_profiles':
+        env['BOXCOP_PACKAGE_FEED_URL'] = 'https://feed.example/policy.json'
+        env['BOXCOP_PACKAGE_FEED_MINIMUM_SEQUENCE'] = '7'
     if case != 'missing_profiles':
         for kind in ['app', 'network']:
             if case != 'custom_profiles':
@@ -436,6 +549,11 @@ def test_distribution_wrapper_requires_signing_and_notarization(tmp_path, case):
         assert result.returncode == 0, result.stderr
         assert json.loads(capture.read_text()) == [str(BUILD), '--profile', 'distribution', '--channel', env.get('BOXCOP_CHANNEL', 'beta'), '--output', str(output),
                                                    '--signing-identity', fingerprint, '--notary-profile', 'sentinel-beta'] + extra
+        # The install gate works in a local build: the existing signed feed is the default.
+        default_key = '4vFHQbvIWeK3TVnv7vCjb8M0yTisaM1hpvnUA3F6ZYw='
+        expected_feed = (['https://feed.example/policy.json', default_key, '7'] if case == 'custom_profiles'
+                         else ['https://getallay.ai/package-feed/v1/policy.json', default_key, '1'])
+        assert json.loads(feed_capture.read_text()) == expected_feed
     else:
         assert result.returncode != 0
         assert not capture.exists(), 'Never invoke builder after failed distribution preflight'
@@ -495,10 +613,41 @@ def test_ambiguous_legacy_build_profiles_are_rejected(tmp_path, profile):
     assert not (tmp_path / 'out').exists()
 
 
-def test_app_registers_team_invitation_scheme():
-    info = plistlib.loads((MAC / "Resources" / "Info.plist").read_bytes())
-    assert info["CFBundleURLTypes"] == [{
-        "CFBundleURLName": "local.sentinel.endpoint.team-invitation",
-        "CFBundleTypeRole": "Viewer",
-        "CFBundleURLSchemes": ["boxcop"],
-    }]
+@pytest.mark.parametrize('source,expected', [
+    ({}, {}),
+    ({'BOXCOP_UPDATE_FEED_URL': '', 'BOXCOP_UPDATE_PUBLIC_KEY': ''}, {}),
+    ({'BOXCOP_VERSION': '1.2.3'}, {'CFBundleShortVersionString': '1.2.3'}),
+])
+def test_builds_without_an_update_feed_embed_none(source, expected):
+    assert load_builder().release_metadata(source) == expected
+
+
+def test_update_feed_needs_url_and_key_together():
+    import base64
+    builder = load_builder()
+    key = base64.b64encode(b'k' * 32).decode()
+    feed = 'https://updates.example/boxcop/appcast.xml'
+    assert builder.release_metadata({'BOXCOP_UPDATE_FEED_URL': feed, 'BOXCOP_UPDATE_PUBLIC_KEY': key}) == {
+        'SUFeedURL': feed, 'SUPublicEDKey': key}
+    for source in ({'BOXCOP_UPDATE_FEED_URL': feed}, {'BOXCOP_UPDATE_PUBLIC_KEY': key}):
+        with pytest.raises(builder.BuildError, match='together'):
+            builder.release_metadata(source)
+    with pytest.raises(builder.BuildError, match='public key'):
+        builder.release_metadata({'BOXCOP_UPDATE_FEED_URL': feed, 'BOXCOP_UPDATE_PUBLIC_KEY': 'bm90IGEga2V5'})
+
+
+def test_dmg_background_artwork_is_boxcop():
+    svg = (MAC / 'Resources/dmg/background.svg').read_text()
+    assert 'Drag BoxCop to Applications' in svg
+    assert '#0A1730' in svg and '#2F6BFF' in svg
+    assert 'Allay' not in svg
+
+
+def test_updater_startup_report_must_match_the_build_configuration():
+    builder = load_builder()
+    builder.check_updater_startup('UPDATER_STARTUP_PASS', True)
+    builder.check_updater_startup('UPDATER_STARTUP_SKIPPED: no update feed configured', False)
+    with pytest.raises(builder.BuildError, match='failed its startup check'):
+        builder.check_updater_startup('UPDATER_STARTUP_SKIPPED: no update feed configured', True)
+    with pytest.raises(builder.BuildError, match='no update feed'):
+        builder.check_updater_startup('UPDATER_STARTUP_PASS', False)

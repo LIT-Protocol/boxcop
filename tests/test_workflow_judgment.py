@@ -158,7 +158,7 @@ class WorkflowUsageTests(unittest.TestCase):
         import tempfile
         from pathlib import Path
         from server.store import Store
-        from server.classifier_usage import ClassifierUsage, QWEN_BACKEND, MINILM_BACKEND
+        from server.classifier_usage import ClassifierUsage, QWEN_BACKEND
         with tempfile.TemporaryDirectory() as directory:
             store = Store(Path(directory) / 'events.sqlite3')
             usage = ClassifierUsage(store)
@@ -170,7 +170,7 @@ class WorkflowUsageTests(unittest.TestCase):
             snapshot = judge.status()['modelUsage']
             self.assertEqual(snapshot['backends'][QWEN_BACKEND]['attempts'], 1)
             self.assertEqual(snapshot['backends'][QWEN_BACKEND]['ready'], 1)
-            self.assertEqual(snapshot['backends'][MINILM_BACKEND]['attempts'], 0)
+            self.assertEqual(set(snapshot['backends']), {QWEN_BACKEND})
             judge.clear()
             self.assertEqual(judge.status()['modelUsage'], snapshot)
             self.assertEqual(ClassifierUsage(Store(store.path)).snapshot(), snapshot)

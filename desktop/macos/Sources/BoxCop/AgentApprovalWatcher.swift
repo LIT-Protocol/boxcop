@@ -20,6 +20,8 @@ struct PendingApproval: Equatable, Sendable, Identifiable {
     var onNew: ((PendingApproval) -> Void)?
     var onGone: (([String]) -> Void)?
     var onChange: (() -> Void)?
+    /// Summaries come from the local model, so they are requested only while smart triage is on.
+    var explainEnabled = false
 
     private let path: URL
     private var task: Task<Void, Never>?
@@ -30,8 +32,7 @@ struct PendingApproval: Equatable, Sendable, Identifiable {
     private var explained: Set<String> = []
     private var explaining = false
 
-    init(directory: URL = FileManager.default.homeDirectoryForCurrentUser
-            .appendingPathComponent("Library/Application Support/BoxCop/human-review", isDirectory: true)) {
+    init(directory: URL = EngineTools.dataDirectory.appendingPathComponent("human-review", isDirectory: true)) {
         path = directory.appendingPathComponent("state.json")
     }
 
@@ -91,11 +92,11 @@ struct PendingApproval: Equatable, Sendable, Identifiable {
 
     /// Optional local-model summaries. One batch at a time; each request is attempted once.
     private func explain() {
-        guard !explaining, let input = try? JSONSerialization.data(withJSONObject: ["op": "explain"]) else { return }
+        guard !explaining, explainEnabled else { return }
         explaining = true
         let ids = Set(pending.map(\.id))
         Task { [weak self] in
-            _ = await ReviewService.request(input)
+            _ = await ReviewService.request(["op": "explain"])
             guard let self else { return }
             self.explained.formUnion(ids)
             self.explaining = false

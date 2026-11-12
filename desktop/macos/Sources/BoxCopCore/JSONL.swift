@@ -6,14 +6,14 @@ public enum EngineFailure: String, Error, Equatable, Sendable, CustomStringConve
         switch self {
         case .invalidRequest: return "Engine rejected the request."
         case .lineTooLarge: return "Engine protocol frame exceeded the size limit."
-        case .internalError: return "Engine could not evaluate this request."
+        case .internalError: return "Engine could not complete this request."
         case .protocolViolation: return "Engine returned an unsupported response."
         case .notReady: return "Engine is not ready."
         case .launchFailed: return "Engine could not start. Check the app installation and retry."
         case .disconnected: return "Engine connection ended. Retry to start a new session."
         case .timedOut: return "Engine response timed out. Retry to start a new session."
-        case .backpressure: return "Engine is busy. This item was not evaluated."
-        case .cancelled: return "Evaluation cancelled."
+        case .backpressure: return "Engine is busy. Try again."
+        case .cancelled: return "Request cancelled."
         case .invalidConfiguration: return "Engine configuration is invalid."
         }
     }
@@ -79,7 +79,7 @@ struct StrictJSON {
             repeat {
                 let key = try string()
                 guard keys.insert(key).inserted, consume(58) else { throw EngineFailure.protocolViolation }
-                try value(depth: depth + 1, integer: ["version", "protocol", "app_pid", "limit", "total"].contains(key))
+                try value(depth: depth + 1, integer: ["version", "protocol", "limit"].contains(key))
                 if consume(125) { return }
                 guard consume(44) else { throw EngineFailure.protocolViolation }
             } while true

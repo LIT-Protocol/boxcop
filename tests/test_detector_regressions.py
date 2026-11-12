@@ -1,6 +1,6 @@
 """Independent regression examples. Every command is inert text, never executed."""
 import pytest
-from server.classify import classify, sanitize_metadata, destination_kind
+from server.classify import classify, sanitize_metadata
 
 
 @pytest.mark.parametrize('text', [
@@ -38,11 +38,6 @@ def test_hr_format_variants(text):
 ])
 def test_hr_engineering_negatives(text):
     assert 'hr-sensitive' not in classify(text)
-
-
-@pytest.mark.parametrize('name', ['local-shell', 'shell', 'terminal'])
-def test_local_command_destinations(name):
-    assert destination_kind(name) == 'local'
 
 
 def test_environment_credential_assignment():

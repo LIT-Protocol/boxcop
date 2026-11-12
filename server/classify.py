@@ -47,8 +47,6 @@ URL = re.compile(
 )
 PATH_TOKEN = re.compile(r"^(?:[A-Za-z0-9_-]{32,}|(?=[A-Za-z0-9_-]*[A-Za-z])(?=[A-Za-z0-9_-]*[0-9])[A-Za-z0-9_-]{16,})$")
 CONTROL = re.compile(r"[\x00-\x1f\x7f-\x9f]")
-AI_DOMAINS = frozenset({"chatgpt.com", "chat.openai.com", "claude.ai", "gemini.google.com", "copilot.microsoft.com", "perplexity.ai", "www.perplexity.ai"})
-LOCAL_NAMES = frozenset({"local", "clipboard", "terminal", "workbench", "local-shell", "shell"})
 
 
 def classify(text: str) -> list[str]:
@@ -77,19 +75,6 @@ def redacted_assignment(match) -> bool:
     value = re.split(r"[:=]", match[0], maxsplit=1)[1].strip().strip('"\'')
     value = re.sub(r"^Bearer\s+", "", value, flags=re.I).rstrip('.')
     return value.lower() in {'[redacted]', '<redacted>', '[removed]'}
-
-
-# Declared source systems whose copies are sensitive even when the text alone
-# looks innocuous. The source is caller-declared context, not verified origin.
-SENSITIVE_SOURCE = re.compile(
-    r"\b(?:HRIS?|human\s+resources|Workday|BambooHR|Rippling|Gusto|ADP|payroll|personnel|"
-    r"EHR|EMR|Cerner|Epic\s+(?:Hyperspace|Haiku|Care\s*Everywhere)|patient\s+portal|medical\s+records?)\b",
-    re.I,
-)
-
-
-def source_labels(source: str) -> list[str]:
-    return ["sensitive-source"] if SENSITIVE_SOURCE.search(source) else []
 
 
 def redact(text: str) -> str:
@@ -137,28 +122,3 @@ def sanitize_metadata(text: str, *, truncate: bool = True) -> str:
     # Whole-body comparison must see the complete input before the storage cap.
     # Only that in-memory caller opts out; persisted metadata keeps the default.
     return result[:1024] if truncate else result
-
-
-def destination_kind(destination: str) -> str:
-    value = destination.strip()
-    if value.lower() in LOCAL_NAMES:
-        return "local"
-    if not value or "\\" in value or any(c.isspace() or ord(c) < 32 for c in value):
-        return "unknown"
-    try:
-        parsed = urlsplit(value if "://" in value else "//" + value)
-        if parsed.scheme and parsed.scheme.lower() not in {"http", "https"}:
-            return "unknown"
-        host = parsed.hostname
-        parsed.port  # Reject malformed ports instead of trusting a partial parse.
-    except ValueError:
-        return "unknown"
-    if not host or ":" in host and host != "::1":
-        return "unknown"
-    if host in {"localhost", "127.0.0.1", "::1"}:
-        return "local"
-    if host in AI_DOMAINS:
-        return "public-ai"
-    if "." in host:
-        return "external"
-    return "unknown"

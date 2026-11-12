@@ -15,6 +15,12 @@ sys.path.insert(0, str(SCRIPTS))
 import release
 import build_app
 
+FEED = 'https://updates.example/boxcop/appcast.xml'
+
+
+def feed_key(seed=b'u'):
+    return base64.b64encode(Ed25519PrivateKey.from_private_bytes(seed * 32).public_key().public_bytes_raw()).decode()
+
 
 @pytest.mark.parametrize('value', ['1.2', 'v1.2.3', '1.2.3\n', '01.2.3', '1.2.3-beta', '1.2.3;echo injected'])
 def test_invalid_versions(value):
@@ -50,19 +56,25 @@ def test_automatic_version_does_not_overwrite_pending_draft():
                                      {'tagName': 'v0.1.1', 'isDraft': True}])
 
 
-@pytest.mark.parametrize('repo', [release.LEGACY_REPO, release.RENAMED_REPO])
-def test_prepare_exports_resolved_version_and_current_feed(tmp_path, monkeypatch, repo):
+def test_release_identity_is_the_boxcop_repository():
+    assert release.REPO == 'LIT-Protocol/boxcop'
+    assert release.REPOSITORY_ID == '1455881957'
+
+
+def test_prepare_exports_resolved_version_and_configured_feed(tmp_path, monkeypatch):
     monkeypatch.setenv('GITHUB_REF', 'refs/heads/main')
-    monkeypatch.setenv('GITHUB_REPOSITORY', repo)
+    monkeypatch.setenv('GITHUB_REPOSITORY', release.REPO)
     monkeypatch.setenv('GITHUB_REPOSITORY_ID', release.REPOSITORY_ID)
     monkeypatch.setenv('GITHUB_SHA', 'fixture-sha')
+    monkeypatch.setenv('BOXCOP_UPDATE_FEED_URL', FEED)
+    monkeypatch.setenv('BOXCOP_UPDATE_PUBLIC_KEY', feed_key())
     env_file = tmp_path / 'env'
     monkeypatch.setenv('GITHUB_ENV', str(env_file))
     def command(*args):
         if args[:2] == ('git', 'rev-parse'):
             return 'fixture-sha'
         if args[:3] == ('gh', 'release', 'list'):
-            assert args[args.index('--repo') + 1] == repo
+            assert args[args.index('--repo') + 1] == release.REPO
             return '[{"tagName":"v0.1.0","isDraft":false}]'
         assert args == ('git', '-c', 'credential.helper=', '-c',
                         'credential.helper=!gh auth git-credential',
@@ -73,17 +85,31 @@ def test_prepare_exports_resolved_version_and_current_feed(tmp_path, monkeypatch
     assert env_file.read_text().startswith('BOXCOP_VERSION=0.1.1\nBOXCOP_EXTENSION_VERSION=')
     exported = dict(line.split('=', 1) for line in env_file.read_text().splitlines())
     info = plistlib.loads((SCRIPTS.parent / 'Resources/Info.plist').read_bytes())
-    original_key = info['SUPublicEDKey']
     info.update(build_app.release_metadata(exported))
     assert info['CFBundleShortVersionString'] == '0.1.1'
-    assert info['SUFeedURL'] == 'https://getallay.ai/updates/appcast.xml'
-    assert info['SUPublicEDKey'] == original_key
+    assert info['SUFeedURL'] == FEED
+    assert info['SUPublicEDKey'] == feed_key()
+
+
+@pytest.mark.parametrize('missing', ['BOXCOP_UPDATE_FEED_URL', 'BOXCOP_UPDATE_PUBLIC_KEY'])
+@pytest.mark.parametrize('action', ['prepare', 'publish'])
+def test_release_requires_an_explicit_update_feed_before_side_effects(monkeypatch, missing, action):
+    """No update domain is baked in: a release names its feed and key or does not start."""
+    monkeypatch.setenv('GITHUB_REF', 'refs/heads/main')
+    monkeypatch.setenv('GITHUB_REPOSITORY', release.REPO)
+    monkeypatch.setenv('GITHUB_REPOSITORY_ID', release.REPOSITORY_ID)
+    monkeypatch.setenv('BOXCOP_UPDATE_FEED_URL', FEED)
+    monkeypatch.setenv('BOXCOP_UPDATE_PUBLIC_KEY', feed_key())
+    monkeypatch.delenv(missing)
+    monkeypatch.setattr(release, 'command', lambda *a, **kw: pytest.fail('Must not call GitHub'))
+    with pytest.raises(ValueError, match='no default update feed'):
+        getattr(release, action)('0.1.0' if action == 'prepare' else Path('/unused'))
 
 
 @pytest.mark.parametrize('action', ['prepare', 'publish'])
 def test_release_refuses_non_main_before_network(monkeypatch, action):
     monkeypatch.setenv('GITHUB_REF', 'refs/heads/untrusted')
-    monkeypatch.setenv('GITHUB_REPOSITORY', release.LEGACY_REPO)
+    monkeypatch.setenv('GITHUB_REPOSITORY', release.REPO)
     monkeypatch.setenv('GITHUB_REPOSITORY_ID', release.REPOSITORY_ID)
     monkeypatch.setattr(release, 'command', lambda *a, **kw: pytest.fail('Must not call GitHub'))
     with pytest.raises(ValueError, match='main'):
@@ -91,8 +117,8 @@ def test_release_refuses_non_main_before_network(monkeypatch, action):
 
 
 @pytest.mark.parametrize('repo,repo_id', [
-    (release.LEGACY_REPO, '1'), (release.RENAMED_REPO, '1'),
-    ('someone/BoxCop', release.REPOSITORY_ID), (release.RENAMED_REPO, ''),
+    (release.REPO, '1'), ('allayhq/Allay', '1434713741'),
+    ('someone/boxcop', release.REPOSITORY_ID), (release.REPO, ''),
 ])
 @pytest.mark.parametrize('action', ['prepare', 'publish'])
 def test_release_rejects_other_repository_identity_before_side_effects(monkeypatch, repo, repo_id, action):
@@ -104,21 +130,28 @@ def test_release_rejects_other_repository_identity_before_side_effects(monkeypat
         getattr(release, action)('0.1.0' if action == 'prepare' else Path('/unused'))
 
 
-@pytest.mark.parametrize('url', ['', 'https://attacker.example/appcast.xml',
-    'http://github.com/allayhq/Allay/releases/latest/download/appcast.xml',
-    'https://github.com/allayhq/Allay/releases/latest/download/appcast.xml\n'])
+@pytest.mark.parametrize('url', ['https://user:secret@updates.example/appcast.xml',
+    'http://updates.example/appcast.xml', 'https://updates.example/appcast.xml\n',
+    'https://updates.example/appcast.xml?channel=beta', 'https://updates.example/download', 'file:///tmp/appcast.xml'])
 def test_invalid_update_feed_fails_before_build_writes(tmp_path, monkeypatch, url):
     monkeypatch.setenv('BOXCOP_UPDATE_FEED_URL', url)
+    monkeypatch.setenv('BOXCOP_UPDATE_PUBLIC_KEY', feed_key())
     output = tmp_path / 'must-not-exist'
-    with pytest.raises(build_app.BuildError, match='approved BoxCop release feed'):
+    with pytest.raises(build_app.BuildError, match='BOXCOP_UPDATE_FEED_URL'):
         build_app.build(output, host_system='Darwin', profile='limited-development')
     assert not output.exists()
 
 
-def test_local_build_uses_hosted_update_route():
+def test_checkout_bakes_in_no_update_feed():
     assert build_app.release_metadata({}) == {}
     info = plistlib.loads((SCRIPTS.parent / 'Resources/Info.plist').read_bytes())
-    assert info['SUFeedURL'] == release.update_feed_url(release.LEGACY_REPO)
+    assert 'SUFeedURL' not in info and 'SUPublicEDKey' not in info
+    for script in ('build_app.py', 'release.py'):
+        assert 'getallay.ai/updates' not in (SCRIPTS / script).read_text()
+
+
+def test_release_files_are_served_beside_the_appcast():
+    assert release.download_prefix(FEED, 'v1.2.3') == 'https://updates.example/boxcop/v1.2.3/'
 
 
 @pytest.fixture
@@ -126,11 +159,15 @@ def publication(tmp_path, monkeypatch):
     monkeypatch.setenv('GITHUB_REF', 'refs/heads/main')
     monkeypatch.setenv('GITHUB_REPOSITORY_ID', release.REPOSITORY_ID)
     monkeypatch.setenv('GITHUB_SHA', 'fixture-sha')
+    monkeypatch.setenv('GITHUB_REPOSITORY', release.REPO)
     monkeypatch.setenv('BOXCOP_VERSION', '0.1.0')
     monkeypatch.setenv('BOXCOP_EXTENSION_VERSION', '123')
     monkeypatch.setenv('GITHUB_STEP_SUMMARY', str(tmp_path / 'summary'))
     key = Ed25519PrivateKey.generate()
+    public = base64.b64encode(key.public_key().public_bytes_raw()).decode()
     monkeypatch.setenv('BOXCOP_SPARKLE_PRIVATE_KEY', base64.b64encode(key.private_bytes_raw()).decode())
+    monkeypatch.setenv('BOXCOP_UPDATE_FEED_URL', FEED)
+    monkeypatch.setenv('BOXCOP_UPDATE_PUBLIC_KEY', public)
     monkeypatch.setattr(release, 'ROOT', tmp_path)
     (tmp_path / 'desktop/macos/.build-artifacts/bundle-fixture/swift/artifacts/sparkle/Sparkle/bin').mkdir(parents=True)
     output = tmp_path / 'out'
@@ -143,16 +180,13 @@ def publication(tmp_path, monkeypatch):
     (output / 'build-evidence.json').write_text(json.dumps(dict(
         profile='distribution', architecture='arm64', notarization='accepted_and_stapled',
         signature_verification='passed', source_commit='fixture-sha', version='0.1.0')))
-    info = dict(CFBundleVersion='123', CFBundleShortVersionString='0.1.0',
-                SUPublicEDKey=base64.b64encode(key.public_key().public_bytes_raw()).decode())
+    info = dict(CFBundleVersion='123', CFBundleShortVersionString='0.1.0', SUFeedURL=FEED, SUPublicEDKey=public)
     return output, info, key
 
 
-@pytest.mark.parametrize('repo', [release.LEGACY_REPO, release.RENAMED_REPO])
-def test_publication_uses_current_owner_for_feed_assets_and_github(publication, monkeypatch, repo):
+def test_publication_uses_configured_feed_for_assets_and_github(publication, monkeypatch):
     output, info, key = publication
-    monkeypatch.setenv('GITHUB_REPOSITORY', repo)
-    info.update(build_app.release_metadata({'BOXCOP_UPDATE_FEED_URL': release.update_feed_url(repo)}))
+    repo = release.REPO
     (output / 'BoxCop.app/Contents/Info.plist').write_bytes(plistlib.dumps(info))
     calls = []
 
@@ -160,8 +194,8 @@ def test_publication_uses_current_owner_for_feed_assets_and_github(publication, 
         calls.append(args)
         if Path(args[0]).name == 'generate_appcast':
             prefix = args[args.index('--download-url-prefix') + 1]
-            assert prefix == 'https://getallay.ai/updates/v0.1.0/'
-            assert args[args.index('--link') + 1] == 'https://getallay.ai/download'
+            assert prefix == 'https://updates.example/boxcop/v0.1.0/'
+            assert args[args.index('--link') + 1] == 'https://github.com/LIT-Protocol/boxcop/releases'
             archive = output / 'release/BoxCop-0.1.0-arm64.dmg'
             root = ET.Element('rss')
             item = ET.SubElement(ET.SubElement(root, 'channel'), 'item')
@@ -186,17 +220,27 @@ def test_publication_uses_current_owner_for_feed_assets_and_github(publication, 
     assert (output / 'release/threat-domains-manifest.json').is_file()
     assert threats['revision'] in (output / 'release-notes.md').read_text()
     assert f'https://github.com/{repo}/releases/tag/v0.1.0' in (output.parent / 'summary').read_text()
+    notes = (output / 'release-notes.md').read_text()
+    assert 'BoxCop 0.1.0' in notes and 'Allay' not in notes
 
 
 def test_publication_rejects_bundle_with_wrong_feed_before_signing(publication, monkeypatch):
     output, info, _ = publication
-    monkeypatch.setenv('GITHUB_REPOSITORY', release.RENAMED_REPO)
-    info['SUFeedURL'] = 'https://github.com/Ember-Sovereignty/BoxCop/releases/latest/download/appcast.xml'
+    info['SUFeedURL'] = 'https://other.example/appcast.xml'
     (output / 'BoxCop.app/Contents/Info.plist').write_bytes(plistlib.dumps(info))
     monkeypatch.setattr(release, 'command', lambda *a, **kw: pytest.fail('Must not sign or publish'))
     with pytest.raises(ValueError, match='update feed does not match'):
         release.publish(output)
     assert not (output / 'release').exists()
+
+
+def test_publication_rejects_bundle_built_with_another_update_key(publication, monkeypatch):
+    output, info, _ = publication
+    info['SUPublicEDKey'] = feed_key(b'x')
+    (output / 'BoxCop.app/Contents/Info.plist').write_bytes(plistlib.dumps(info))
+    monkeypatch.setattr(release, 'command', lambda *a, **kw: pytest.fail('Must not sign or publish'))
+    with pytest.raises(ValueError, match='update feed does not match'):
+        release.publish(output)
 
 
 def test_key_must_match_embedded_public_key():
@@ -219,7 +263,7 @@ def test_feed_binds_version_url_length_and_archive_bytes(tmp_path):
     item = ET.SubElement(ET.SubElement(root, 'channel'), 'item')
     ET.SubElement(item, release.SPARKLE + 'version').text = '123'
     ET.SubElement(item, release.SPARKLE + 'shortVersionString').text = '0.1.0'
-    url = 'https://github.com/Ember-Sovereignty/BoxCop/releases/download/v0.1.0/BoxCop.dmg'
+    url = 'https://updates.example/boxcop/v0.1.0/BoxCop.dmg'
     enclosure = ET.SubElement(item, 'enclosure', {'url': url, 'length': str(archive.stat().st_size),
                     release.SPARKLE + 'edSignature': base64.b64encode(key.sign(archive.read_bytes())).decode()})
     feed = tmp_path / 'appcast.xml'
@@ -290,6 +334,7 @@ def test_packaged_sparkle_startup(tmp_path, verify_before_extraction):
     shutil.copy2(executable, contents / 'MacOS/BoxCop')
     shutil.copytree(executable.parent / 'Sparkle.framework', contents / 'Frameworks/Sparkle.framework', symlinks=True)
     info = plistlib.loads((SCRIPTS.parent / 'Resources/Info.plist').read_bytes())
+    info.update(SUFeedURL=FEED, SUPublicEDKey=feed_key())
     info['CFBundleIdentifier'] = 'local.boxcop.updater-test.' + uuid.uuid4().hex
     info['SUEnableAutomaticChecks'] = False
     assert info['SURequireSignedFeed'] is True

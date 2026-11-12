@@ -1,5 +1,7 @@
-# Offline malware matching, signed updates and the optional registry helper.
+# Engine runtime dependencies beyond requirements-build.txt: offline malware
+# matching, signed feed updates, the registry helper and deployment-file parsing.
 cryptography==50.0.2
 packaging==26.3
 semantic-version==2.10.0
 httpx==0.28.1
+pyyaml==6.0.3

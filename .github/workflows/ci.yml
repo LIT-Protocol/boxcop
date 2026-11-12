@@ -1,0 +1,89 @@
+name: CI
+
+# Pull requests and pushes to main run the Python tests on Linux and, on a
+# GitHub-hosted Mac, the Swift tests plus an ad-hoc signed limited-development
+# build with a first-launch smoke test. No signing secrets are used here. The
+# limited-development build has no network extension; the signed build that
+# includes it is made by build.sh locally or by the Release workflow.
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: ci-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  python:
+    name: Python tests (Linux)
+    runs-on: ubuntu-24.04
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - uses: actions/setup-python@6d4fd22b20465ccc0f7354476588e8df7c9ca0e0 # v7.1.0
+        with:
+          python-version: "3.12"
+      - name: Install dependencies
+        run: |
+          python -m venv .venv
+          .venv/bin/python -m pip install --disable-pip-version-check -r requirements.txt
+      - name: Tests
+        # Tests that need macOS, npm, pnpm or uv skip themselves when the tool is absent.
+        run: env -u PYTHONPATH -u PYTHONHOME .venv/bin/python -m pytest -q tests
+
+  macos:
+    name: BoxCop.app (macOS, arm64)
+    runs-on: macos-15
+    timeout-minutes: 60
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - uses: actions/setup-python@6d4fd22b20465ccc0f7354476588e8df7c9ca0e0 # v7.1.0
+        with:
+          python-version: "3.12"
+      - name: Toolchain
+        run: |
+          sw_vers
+          uname -m
+          xcodebuild -version
+          swift --version
+          python3.12 --version
+          command -v cmake >/dev/null || brew install cmake
+          cmake --version
+      - name: Swift tests (streamed, 120 s deadline per run)
+        run: bash desktop/macos/scripts/ci_swift_tests.sh 120 "$RUNNER_TEMP/out/swift-diagnostics"
+      - name: Build limited-development app (ad-hoc signed, no network extension)
+        env:
+          # BoxCop consumes the existing signed Allay package feed until it hosts its own.
+          # These are the same public values build.sh uses by default.
+          BOXCOP_PACKAGE_FEED_URL: https://getallay.ai/package-feed/v1/policy.json
+          BOXCOP_PACKAGE_FEED_PUBLIC_KEY_BASE64: 4vFHQbvIWeK3TVnv7vCjb8M0yTisaM1hpvnUA3F6ZYw=
+          BOXCOP_PACKAGE_FEED_MINIMUM_SEQUENCE: "1"
+        run: python3.12 desktop/macos/scripts/build_app.py --profile limited-development --output "$RUNNER_TEMP/out"
+      - name: Launch smoke (no engine and no audit data before setup)
+        run: bash desktop/macos/scripts/ci_launch_smoke.sh "$RUNNER_TEMP/out/BoxCop.app" "$RUNNER_TEMP/out"
+      - name: Interface screenshots (sample data)
+        run: '"$RUNNER_TEMP/out/BoxCop.app/Contents/MacOS/BoxCop" --dev-interface-preview "$RUNNER_TEMP/out/interface-preview"'
+      - name: Upload app and build evidence
+        if: always()
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+        with:
+          name: BoxCop-limited-development-arm64
+          path: |
+            ${{ runner.temp }}/out/BoxCop.dmg
+            ${{ runner.temp }}/out/build-evidence.json
+            ${{ runner.temp }}/out/launch-smoke.txt
+            ${{ runner.temp }}/out/first-run.png
+            ${{ runner.temp }}/out/interface-preview/
+            ${{ runner.temp }}/out/swift-diagnostics/
+          if-no-files-found: warn
+          retention-days: ${{ github.event_name == 'pull_request' && 3 || 14 }}

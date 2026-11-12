@@ -19,6 +19,7 @@ SOURCES = {
     'pwn': 'https://pwn.watch/feed.json',
     'zero-wire': 'https://radar.cloudflare.com/security/zero-wire/rss',
 }
+REPOSITORY = 'LIT-Protocol/boxcop'  # Where review pull requests are opened.
 LEDGER = 'research/security-feed-review.json'
 PREFIX = 'automation/security-feed-review-'
 MAX_BYTES = 8 * 1024 * 1024
@@ -166,7 +167,7 @@ def validate_review(path, items, root, historical_ids=()):
 
 
 def prompt(items_path):
-    return f'''Review the latest security discovery feeds for BoxCop/BoxCop and implement justified coverage additions.
+    return f'''Review the latest security discovery feeds for BoxCop and implement justified coverage additions.
 Read AGENTS.md if present, README.md, docs/software-exposure.md, docs/outgoing-connections.md,
 server/exposure_advisories.py, server/software_inventory.py, server/supply_chain.py,
 server/host_agents.py, server/skill_security.py, and existing incident tests/research.
@@ -191,7 +192,7 @@ Covered means the stated scope is implemented and tested; cite tests. Partial mu
 behavior. Use existing status/rationale for unchanged facts to avoid timestamp-only PR churn.
 Write concise original summaries, not copies of articles. Raw downloads stay in .context only.
 Run relevant tests, including the fixed Python suite the wrapper will rerun; run Swift tests if native
-code changes. Only modify server/, tests/, adapters/, desktop/macos/, docs/, research/ and README.md.
+code changes. Only modify server/, tests/, desktop/macos/, docs/, research/ and README.md.
 Do not modify scripts/, CI, dependencies, signing or runtime privileges. Do not build/deploy the app.
 Write .context/security-feed-review/pr-body.md describing the final changes, source links, tests,
 remaining gaps and distinction between advisory findings and prevention. Finish only after tests pass
@@ -203,7 +204,7 @@ def changed_paths(worktree):
     tracked = output(['git', 'diff', '--name-only', 'HEAD'], worktree).splitlines()
     untracked = output(['git', 'ls-files', '--others', '--exclude-standard'], worktree).splitlines()
     paths = sorted(set(tracked + untracked))
-    allowed = ('server/', 'tests/', 'adapters/', 'desktop/macos/', 'docs/', 'research/')
+    allowed = ('server/', 'tests/', 'desktop/macos/', 'docs/', 'research/')
     if any(p != 'README.md' and not p.startswith(allowed) for p in paths):
         raise ValueError('Review modified paths outside its allowed scope: ' + repr(paths))
     return paths
@@ -231,7 +232,7 @@ def main():
         run(['codex', '--version'])
         run(['gh', 'auth', 'status'])
         # One pending daily review at a time, even across different local workspaces.
-        prs = json.loads(output(['gh', 'pr', 'list', '--state', 'open', '--base', 'main',
+        prs = json.loads(output(['gh', 'pr', 'list', '--repo', REPOSITORY, '--state', 'open', '--base', 'main',
                                  '--limit', '1000', '--json', 'headRefName,url']))
         existing = [p['url'] for p in prs if p['headRefName'].startswith(PREFIX)]
         if existing:
@@ -277,7 +278,7 @@ def main():
         run(['git', 'add', '--', *paths], worktree)
         run(['git', 'commit', '-m', 'Review security feeds and extend supported coverage'], worktree)
         run(['git', 'push', '-u', 'origin', branch], worktree)
-        run(['gh', 'pr', 'create', '--draft', '--base', 'main', '--head', branch,
+        run(['gh', 'pr', 'create', '--repo', REPOSITORY, '--draft', '--base', 'main', '--head', branch,
              '--title', 'Review security feeds and extend BoxCop coverage', '--body-file', body], worktree)
         print(f'Worktree retained: {worktree}. Review and merge the draft PR normally.')
 

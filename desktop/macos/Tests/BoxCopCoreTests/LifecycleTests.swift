@@ -1,7 +1,7 @@
 import XCTest
 @testable import BoxCopCore
 
-/// Lifecycle contracts for a resident endpoint: slow first launch, sleep/wake and explicit auto-start.
+/// Lifecycle contracts for a resident app: a slow first launch and a clean child environment.
 final class LifecycleTests: XCTestCase {
     private func peer(_ mode: String) throws -> EngineConfiguration {
         let fixture = try XCTUnwrap(Bundle.module.url(forResource: "peer", withExtension: "pl", subdirectory: "Fixtures"))
@@ -15,7 +15,7 @@ final class LifecycleTests: XCTestCase {
         try await client.start(configuration: peer("slowstart"))
         let state = await client.snapshot()
         XCTAssertTrue(state.ready)
-        guard case .recent = try await client.request(.recent(1)) else { return XCTFail("Not recent") }
+        guard case .securityEvents = try await client.request(.securityEvents(1)) else { return XCTFail("Not events") }
         await client.stop()
     }
 
@@ -38,42 +38,5 @@ final class LifecycleTests: XCTestCase {
             "BOXCOP_ENGINE_EXECUTABLE": "/x", "BOXCOP_ENGINE_ARGUMENTS": "[]"
         ])
         XCTAssertEqual(cleaned, ["PATH": "/usr/bin:/bin", "HOME": "/Users/example", "LANG": "en_US.UTF-8"])
-    }
-
-    func testOlderPreferencesWithoutAutoStartKeepConsentAndDefaultOff() throws {
-        let legacy = Data(#"{"monitoring":true,"guardShortcut":true,"notifications":false,"role":"hr"}"#.utf8)
-        let choices = try JSONDecoder().decode(ConsentChoices.self, from: legacy)
-        XCTAssertTrue(choices.monitoring)
-        XCTAssertTrue(choices.guardShortcut)
-        XCTAssertEqual(choices.role, .hr)
-        XCTAssertFalse(choices.notifications, "Preserve an existing notification opt-out")
-        XCTAssertFalse(choices.autoStart)
-    }
-
-    func testAutoStartIsOffByDefaultAndRequiresMonitoringConsent() {
-        var choices = ConsentChoices()
-        XCTAssertFalse(choices.autoStart)
-        XCTAssertFalse(choices.startsAutomatically)
-        choices.autoStart = true
-        XCTAssertFalse(choices.startsAutomatically)
-        choices.monitoring = true
-        XCTAssertTrue(choices.startsAutomatically)
-    }
-
-    func testWakeResumesOnlyASessionThatSleepInterrupted() {
-        var resume = SleepResume()
-        resume.sleep(wasRunning: true)
-        XCTAssertTrue(resume.wake(consent: true))
-        XCTAssertFalse(resume.wake(consent: true), "Resume is single-use")
-
-        resume.sleep(wasRunning: false)
-        XCTAssertFalse(resume.wake(consent: true), "A stopped session stays stopped")
-
-        resume.sleep(wasRunning: true)
-        resume.userStopped()
-        XCTAssertFalse(resume.wake(consent: true), "An explicit pause or revocation wins")
-
-        resume.sleep(wasRunning: true)
-        XCTAssertFalse(resume.wake(consent: false), "Revoked consent never resumes")
     }
 }

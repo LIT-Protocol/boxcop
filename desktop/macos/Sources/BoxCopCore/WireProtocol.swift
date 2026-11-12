@@ -1,23 +1,5 @@
 import Foundation
 
-public enum EventKind: String, Codable, Sendable { case clipboardCopy = "clipboard_copy", pasteAttempt = "paste_attempt", pastePreparation = "paste_prepare" }
-
-/// Transient outbound payload only; never persist, display or log this type.
-public struct DesktopEvent: Encodable, Sendable, CustomStringConvertible, CustomDebugStringConvertible {
-    public let kind: EventKind
-    private let content: String
-    private let appBundleID: String
-    private let appPID: Int32
-    private let role: Role
-    enum CodingKeys: String, CodingKey { case kind, content, appBundleID = "app_bundle_id", appPID = "app_pid", role }
-    public init(kind: EventKind, content: String, bundleID: String, pid: Int32, role: Role) throws {
-        guard content.unicodeScalars.prefix(4097).count <= 4096, IdentityValidation.bundle(bundleID), pid > 0 else { throw EngineFailure.invalidRequest }
-        self.kind = kind; self.content = content; appBundleID = bundleID; appPID = pid; self.role = role
-    }
-    public var description: String { "DesktopEvent(transient content omitted)" }
-    public var debugDescription: String { description }
-}
-
 public enum PackageProtectionAction: String, Sendable { case status, enable, disable }
 public struct PackageProtectionStatus: Decodable, Sendable {
     public let configured: Bool, routed: Bool, active: Bool, busy: Bool, stale: Bool
@@ -48,12 +30,73 @@ public struct ScriptProtectionStatus: Decodable, Sendable {
     public let exceptions: [ScriptDestinationException]
 }
 
+/// One protection decision reported by the engine for layers 1, 2 and 4. Never carries secrets or file content.
+public struct SecurityEvent: Decodable, Identifiable, Equatable, Sendable {
+    public enum Layer: String, Sendable { case installGate = "install_gate", containment, agentActions = "agent_actions" }
+    public enum Outcome: String, Sendable { case blocked, held, approved, rejected, warned }
+    public let id: String
+    public let time: Date
+    public let layer: Layer
+    public let outcome: Outcome
+    public let title: String
+    public let reason: String
+    public let subject: String
+    public let agent: String?
+    public let command: String?
+    public let package: String?
+    public let host: String?
+    public let policyIDs: [String]
+    public init(id: String, time: Date, layer: Layer, outcome: Outcome, title: String, reason: String, subject: String,
+                agent: String? = nil, command: String? = nil, package: String? = nil, host: String? = nil, policyIDs: [String] = []) {
+        self.id = id; self.time = time; self.layer = layer; self.outcome = outcome; self.title = title; self.reason = reason
+        self.subject = subject; self.agent = agent; self.command = command; self.package = package; self.host = host; self.policyIDs = policyIDs
+    }
+    public init(from decoder: Decoder) throws {
+        let c = try decoder.container(keyedBy: WireKey.self)
+        func text(_ name: String, limit: Int) throws -> String? {
+            guard let value = try c.decodeIfPresent(String.self, forKey: WireKey(name)), !value.isEmpty else { return nil }
+            return String(value.prefix(limit))
+        }
+        guard let id = try text("id", limit: 200), let stamp = try text("time", limit: 40), let date = Self.date(stamp),
+              let layer = try text("layer", limit: 32).flatMap(Layer.init(rawValue:)),
+              let outcome = try text("outcome", limit: 32).flatMap(Outcome.init(rawValue:)),
+              let title = try text("title", limit: 300) else { throw EngineFailure.protocolViolation }
+        self.id = id; time = date; self.layer = layer; self.outcome = outcome; self.title = title
+        reason = try text("reason", limit: 1000) ?? ""
+        subject = try text("subject", limit: 500) ?? ""
+        agent = try text("agent", limit: 32); command = try text("command", limit: 4096)
+        package = try text("package", limit: 255); host = try text("host", limit: 255)
+        policyIDs = Array((try c.decodeIfPresent([String].self, forKey: WireKey("policy_ids")) ?? []).prefix(32))
+    }
+    /// ISO 8601 with or without fractional seconds.
+    public static func date(_ text: String) -> Date? {
+        let formatter = ISO8601DateFormatter()
+        formatter.formatOptions = [.withInternetDateTime, .withFractionalSeconds]
+        if let date = formatter.date(from: text) { return date }
+        formatter.formatOptions = [.withInternetDateTime]
+        return formatter.date(from: text)
+    }
+}
+/// A newer engine may report a layer or outcome this build does not know; that row is skipped, not the whole list.
+private struct LossySecurityEvent: Decodable {
+    let event: SecurityEvent?
+    init(from decoder: Decoder) throws { event = try? SecurityEvent(from: decoder) }
+}
+
 public enum EngineCommand: Sendable, CustomStringConvertible {
     case packageProtection(PackageProtectionAction)
     case scriptProtection(ScriptProtectionAction, package: String = "", host: String = "")
-    case status, evaluate(DesktopEvent), recent(Int), policies, shutdown, workflowContext(WorkflowContext), workflowClear
+    case status, securityEvents(Int), shutdown, workflowContext(WorkflowContext), workflowClear
     public var operation: String {
-        switch self { case .packageProtection: return "package_protection"; case .scriptProtection: return "script_protection"; case .workflowContext: return "workflow_context"; case .workflowClear: return "workflow_clear"; case .status: return "status"; case .evaluate: return "evaluate"; case .recent: return "recent"; case .policies: return "policies"; case .shutdown: return "shutdown" }
+        switch self {
+        case .packageProtection: return "package_protection"
+        case .scriptProtection: return "script_protection"
+        case .workflowContext: return "workflow_context"
+        case .workflowClear: return "workflow_clear"
+        case .status: return "status"
+        case .securityEvents: return "security_events"
+        case .shutdown: return "shutdown"
+        }
     }
     public var description: String { operation }
 }
@@ -71,182 +114,45 @@ private struct Request: Encodable {
             try c.encode(action.rawValue, forKey: WireKey("action"))
             try c.encode(package, forKey: WireKey("package")); try c.encode(host, forKey: WireKey("host"))
         case let .workflowContext(context): try c.encode(context, forKey: WireKey("context"))
-        case let .evaluate(event): try c.encode(event, forKey: WireKey("event"))
-        case let .recent(limit):
-            guard (1...100).contains(limit) else { throw EngineFailure.invalidRequest }
+        case let .securityEvents(limit):
+            guard (1...200).contains(limit) else { throw EngineFailure.invalidRequest }
             try c.encode(limit, forKey: WireKey("limit"))
         default: break
         }
     }
 }
 
-public struct SafeRecord: Decodable, Identifiable, Sendable {
-    public let id: UUID
-    public let createdAt: Date
-    public let bundleID: String?
-    public let kind: EventKind
-    public let action: DecisionAction
-    public let policyIDs: [String]
-    public var reasons: [String] { policyIDs.isEmpty ? ["No enabled narrow rule matched. This is not a safety guarantee."] : policyIDs.map { PolicyReason.text($0) } }
-    public init(from decoder: Decoder) throws {
-        let c = try decoder.object(["id", "created_at", "synthetic", "event", "decision"])
-        let identifier: String = try c.field("id")
-        guard let id = UUID(uuidString: identifier), try c.field("synthetic", as: Bool.self) == false else { throw EngineFailure.protocolViolation }
-        self.id = id
-        let timestamp: String = try c.field("created_at")
-        let formatter = ISO8601DateFormatter(); formatter.formatOptions = [.withInternetDateTime, .withFractionalSeconds]
-        guard timestamp.count <= 40, let date = formatter.date(from: timestamp) else { throw EngineFailure.protocolViolation }
-        createdAt = date
-        let event: SanitizedEvent = try c.field("event")
-        bundleID = event.bundleID; kind = event.kind
-        let decision: SanitizedDecision = try c.field("decision")
-        action = decision.action; policyIDs = decision.policyIDs
-    }
-}
-private struct SanitizedEvent: Decodable {
-    let bundleID: String?
-    let kind: EventKind
-    init(from decoder: Decoder) throws {
-        let c = try decoder.object(["session_id", "actor", "role", "action", "app", "source", "destination", "content", "declared_intent", "synthetic"])
-        guard try c.field("content", as: String.self) == "[not retained]", try c.field("synthetic", as: Bool.self) == false,
-              try c.field("actor", as: String.self) == "human" else { throw EngineFailure.protocolViolation }
-        let _: Role = try c.field("role")
-        let action: String = try c.field("action")
-        guard ["copy", "paste"].contains(action) else { throw EngineFailure.protocolViolation }
-        let intent: String = try c.field("declared_intent")
-        kind = action == "copy" ? .clipboardCopy : (intent == "Prospective paste policy prepared; no shortcut or transfer observed." ? .pastePreparation : .pasteAttempt)
-        let app: String = try c.field("app")
-        guard IdentityValidation.bundle(app) || (app.count <= 1024 && app.contains("[not retained]")) || app == "[empty after sanitizing]" else { throw EngineFailure.protocolViolation }
-        bundleID = IdentityValidation.bundle(app) ? app : nil
-        // These fields are type-checked but intentionally not retained or presented.
-        for field in ["session_id", "source", "destination", "declared_intent"] { let _: String = try c.field(field) }
-    }
-}
-private struct SanitizedDecision: Decodable {
-    let action: DecisionAction
-    let policyIDs: [String]
-    init(from decoder: Decoder) throws {
-        let c = try decoder.object(["action", "risk_score", "summary", "reasons", "policy_ids", "labels", "redacted_content", "latency_ms", "context_event_ids", "engine"])
-        guard try c.field("redacted_content", as: String.self) == "[not retained]", try c.field("engine", as: String.self) == "rules+sequence" else { throw EngineFailure.protocolViolation }
-        action = try c.field("action"); policyIDs = try c.field("policy_ids")
-        guard policyIDs.count <= 32, policyIDs.allSatisfy({ PolicyReason.known.contains($0) }) else { throw EngineFailure.protocolViolation }
-        let risk: Double = try c.field("risk_score"); let latency: Double = try c.field("latency_ms")
-        guard risk.isFinite, (0...100).contains(risk), latency.isFinite, latency >= 0 else { throw EngineFailure.protocolViolation }
-        let _: String = try c.field("summary")
-        for field in ["reasons", "labels", "context_event_ids"] { let _: [String] = try c.field(field) }
-    }
-}
-
-public enum PolicyReason {
-    public static func recovery(_ action: DecisionAction) -> String {
-        switch action {
-        case .allow: return "Return to the destination and press Command-V. If the decision expired, BoxCop evaluates again."
-        case .warn, .block: return "Remove sensitive values in the source, copy the revised text, then return to the intended destination and press Command-V. Repeating unchanged text will stay held. No approval override is available."
-        }
-    }
-    public static let known: Set<String> = ["skill-instruction-override", "skill-concealed-action", "skill-credential-egress", "skill-remote-execution", "known-malicious-package", "vulnerable-runtime", "unsupported-runtime", "unresolved-runtime-version", "native-sensitive-file", "secret-egress", "sensitive-egress", "high-risk-pii", "pii-egress", "sensitive-local", "ambiguous-command-text", "remote-shell", "download-then-exec", "command-sensitive-egress", "credential-file-egress", "credential-file-access", "destructive-command", "recursive-delete", "role-shell", "sensitive-lineage"]
-    public static func text(_ id: String) -> String {
-        switch id {
-        case "skill-instruction-override": return "Agent input asks to override higher-priority instructions or disable safeguards. Review the source before use."
-        case "skill-concealed-action": return "Agent input asks to conceal actions from the user. Review the source before use."
-        case "skill-credential-egress": return "Agent input combines a credential-store reference and a network tool. Review the source before use."
-        case "skill-remote-execution": return "Agent input contains a remote or decoded execution pattern. Review the source before use."
-        case "known-malicious-package": return "This exact package release is known to contain malware. Use a reviewed release and investigate any previous execution."
-        case "vulnerable-runtime": return "This upstream PHP version predates critical security fixes. Install a patched release before serving web requests."
-        case "unsupported-runtime", "unresolved-runtime-version": return "Verify the exact PHP release and vendor patch status before installing this runtime."
-        case "ambiguous-command-text": return "This executable input contains invisible formatting or terminal control characters. Remove them and review the visible command before retrying."
-        case "remote-shell", "download-then-exec": return "This terminal paste contains a recognizable download or decode followed by execution. Inspect the script separately instead of running it from the clipboard."
-        case "secret-egress": return "Recognizable credentials or private keys target an external or unknown destination."
-        case "sensitive-egress": return "Recognizable medical, personnel or restricted business information targets an external or unknown destination."
-        case "high-risk-pii": return "An SSN-like identifier targets an external or unknown destination."
-        case "pii-egress": return "Recognizable contact information needs a destination and consent review."
-        case "sensitive-local": return "Recognizable sensitive content was observed locally."
-        case "sensitive-lineage": return "An ephemeral exact-content match links this attempt to a sensitive copy in this session."
-        default: return "An enabled deterministic policy requires review."
-        }
-    }
-}
-public struct SafePolicy: Decodable, Identifiable, Sendable {
-    public let id: String
-    public let enabled: Bool
-    public let action: DecisionAction
-    public var reason: String { PolicyReason.text(id) }
-    public init(from decoder: Decoder) throws {
-        let c = try decoder.object(["id", "name", "description", "action", "enabled"])
-        id = try c.field("id"); enabled = try c.field("enabled"); action = try c.field("action")
-        guard PolicyReason.known.contains(id) else { throw EngineFailure.protocolViolation }
-        let _: String = try c.field("name"); let _: String = try c.field("description")
-    }
-}
-public struct ModelBackendUsage: Decodable, Sendable {
-    public let attempts: Int, ready: Int, uncertain: Int, unsupported: Int, unavailable: Int, errors: Int
-    public init(from decoder: Decoder) throws {
-        let c = try decoder.object(["attempts", "ready", "uncertain", "unsupported", "unavailable", "error"])
-        attempts = try c.field("attempts")
-        guard attempts >= 0 else { throw EngineFailure.protocolViolation }
-        var remaining = attempts
-        for name in ["ready", "uncertain", "unsupported", "unavailable", "error"] {
-            let count: Int = try c.field(name)
-            guard count >= 0, count <= remaining else { throw EngineFailure.protocolViolation }
-            remaining -= count
-        }
-        // Unfinished attempts can survive a terminated engine. Never claim that
-        // attempts are successful classifications or observed transfers.
-        ready = try c.field("ready"); uncertain = try c.field("uncertain")
-        unsupported = try c.field("unsupported"); unavailable = try c.field("unavailable"); errors = try c.field("error")
-    }
-}
-public struct ModelUsageStatus: Decodable, Sendable {
-    public let persistenceOK: Bool
-    public let minilm: ModelBackendUsage, qwen: ModelBackendUsage
-    public init(from decoder: Decoder) throws {
-        let c = try decoder.object(["persistence_ok", "backends"])
-        persistenceOK = try c.field("persistence_ok")
-        let backends = try c.superDecoder(forKey: WireKey("backends")).object(["minilm-head-v1", "qwen3.5-4b-workflow-v2"])
-        minilm = try backends.field("minilm-head-v1"); qwen = try backends.field("qwen3.5-4b-workflow-v2")
-    }
-}
-public struct ClassificationStatus: Decodable, Sendable {
-    public let hits: Int, misses: Int, ready: Int, unavailable: Int, uncertain: Int, queued: Int
-    public let modelUsage: ModelUsageStatus?
-    public init(from decoder: Decoder) throws {
-        let peek = try decoder.container(keyedBy: WireKey.self)
-        var keys: Set<String> = ["hits", "misses", "coalesced", "dropped", "completed", "failures", "queued", "cached", "active", "shadow_only", "ready", "unavailable", "uncertain"]
-        if peek.contains(WireKey("model_usage")) { keys.insert("model_usage") }
-        let c = try decoder.object(keys)
-        for name in ["hits", "misses", "coalesced", "dropped", "completed", "failures", "queued", "cached", "ready", "unavailable", "uncertain"] {
-            guard try c.field(name, as: Int.self) >= 0 else { throw EngineFailure.protocolViolation }
-        }
-        guard try c.field("shadow_only", as: Bool.self) else { throw EngineFailure.protocolViolation }
-        let _: Bool = try c.field("active")
-        hits = try c.field("hits"); misses = try c.field("misses"); ready = try c.field("ready")
-        unavailable = try c.field("unavailable"); uncertain = try c.field("uncertain"); queued = try c.field("queued")
-        modelUsage = keys.contains("model_usage") ? try c.field("model_usage") : nil
-    }
-    public var summary: String {
-        // Background model counters do not describe protection or require user action.
-        return "Local checks are ready."
-    }
+/// What the readiness handshake reports about the engine's local listeners.
+public struct EngineStatus: Equatable, Sendable {
+    public let packageRegistryListener: Bool
+    public let installScriptListener: Bool
 }
 public struct WorkflowAssessment: Decodable, Sendable {
-    public struct Signal: Decodable, Sendable { public let eventID: UUID; public let kind: String }
     public let contextID: UUID
     public let eventCount: Int
     public let linkCount: Int
     public let incomplete: Bool
-    public let classifiedFields: Int
     public let judgment: WorkflowJudgmentStatus?
-    public let omittedTextFields: Int
-    public let signals: [Signal]
     public let shadowOnly: Bool
+    enum CodingKeys: String, CodingKey { case contextID, eventCount, linkCount, incomplete, judgment, shadowOnly }
+    public init(from decoder: Decoder) throws {
+        let c = try decoder.container(keyedBy: CodingKeys.self)
+        contextID = try c.decode(UUID.self, forKey: .contextID)
+        eventCount = try c.decode(Int.self, forKey: .eventCount)
+        linkCount = try c.decode(Int.self, forKey: .linkCount)
+        incomplete = try c.decodeIfPresent(Bool.self, forKey: .incomplete) ?? false
+        judgment = try c.decodeIfPresent(WorkflowJudgmentStatus.self, forKey: .judgment)
+        shadowOnly = try c.decodeIfPresent(Bool.self, forKey: .shadowOnly) ?? true
+    }
 }
 public enum EngineResult: Sendable {
     case packageProtection(PackageProtectionStatus)
     case scriptProtection(ScriptProtectionStatus)
-    case status(ClassificationStatus?), record(SafeRecord), recent([SafeRecord], total: Int), policies([SafePolicy]), stopped, workflow(WorkflowAssessment), workflowCleared
+    case status(EngineStatus), securityEvents([SecurityEvent]), stopped, workflow(WorkflowAssessment), workflowCleared
     func matches(_ operation: String) -> Bool {
         switch (self, operation) {
-        case (.packageProtection, "package_protection"), (.scriptProtection, "script_protection"), (.workflow, "workflow_context"), (.workflowCleared, "workflow_clear"), (.status, "status"), (.record, "evaluate"), (.recent, "recent"), (.policies, "policies"), (.stopped, "shutdown"): return true
+        case (.packageProtection, "package_protection"), (.scriptProtection, "script_protection"), (.workflow, "workflow_context"),
+             (.workflowCleared, "workflow_clear"), (.status, "status"), (.securityEvents, "security_events"), (.stopped, "shutdown"): return true
         default: return false
         }
     }
@@ -258,12 +164,18 @@ public struct EngineResponse: Decodable, Sendable {
     public init(from decoder: Decoder) throws {
         let initial = try decoder.container(keyedBy: WireKey.self)
         let ok: Bool = try initial.field("ok")
-        let c = try decoder.object(ok ? ["version", "id", "ok", "result"] : ["version", "id", "ok", "error"])
-        guard try c.field("version", as: Int.self) == 1 else { throw EngineFailure.protocolViolation }
+        // `security_events` may answer with the list at the top level instead of under `result`.
+        let flatEvents = ok && initial.contains(WireKey("events")) && !initial.contains(WireKey("result"))
+        var keys: Set<String> = ok ? (flatEvents ? ["id", "ok", "events"] : ["version", "id", "ok", "result"]) : ["version", "id", "ok", "error"]
+        if flatEvents && initial.contains(WireKey("version")) { keys.insert("version") }
+        let c = try decoder.object(keys)
+        if keys.contains("version") { guard try c.field("version", as: Int.self) == 1 else { throw EngineFailure.protocolViolation } }
         id = try c.decodeIfPresent(String.self, forKey: WireKey("id"))
         guard id.map(IdentityValidation.requestID) ?? !ok else { throw EngineFailure.protocolViolation }
         if !ok {
             let error: SafeError = try c.field("error"); failure = error.code; result = nil
+        } else if flatEvents {
+            failure = nil; result = .securityEvents(try ResultPayload.events(c))
         } else {
             failure = nil; result = try c.field("result", as: ResultPayload.self).result
         }
@@ -279,6 +191,11 @@ private struct SafeError: Decodable {
 }
 private struct ResultPayload: Decodable {
     let result: EngineResult
+    static func events(_ c: KeyedDecodingContainer<WireKey>) throws -> [SecurityEvent] {
+        let rows: [LossySecurityEvent] = try c.field("events")
+        guard rows.count <= 200 else { throw EngineFailure.protocolViolation }
+        return rows.compactMap(\.event)
+    }
     init(from decoder: Decoder) throws {
         let peek = try decoder.container(keyedBy: WireKey.self)
         if peek.contains(WireKey("packageProtection")) {
@@ -288,39 +205,30 @@ private struct ResultPayload: Decodable {
             let c = try decoder.object(["scriptProtection"])
             result = .scriptProtection(try c.field("scriptProtection"))
         } else if peek.contains(WireKey("ready")) {
-            var keys: Set<String> = ["ready", "protocol", "engine", "monitoring", "network_listener"]
-            if peek.contains(WireKey("classification")) { keys.insert("classification") }
-            if peek.contains(WireKey("package_registry_listener")) { keys.insert("package_registry_listener") }
-            if peek.contains(WireKey("install_script_listener")) { keys.insert("install_script_listener") }
-            let c = try decoder.object(keys)
-            let registry = try c.decodeIfPresent(Bool.self, forKey: WireKey("package_registry_listener")) ?? false
-            let scripts = try c.decodeIfPresent(Bool.self, forKey: WireKey("install_script_listener")) ?? false
-            guard try c.field("ready", as: Bool.self), try c.field("protocol", as: Int.self) == 1,
-                  try c.field("engine", as: String.self) == "rules+sequence", try c.field("monitoring", as: Bool.self) == false,
-                  try c.field("network_listener", as: Bool.self) == (registry || scripts) else { throw EngineFailure.notReady }
-            result = .status(try c.decodeIfPresent(ClassificationStatus.self, forKey: WireKey("classification")))
+            // Required: ready, protocol, engine. The listener flags and `monitoring` are optional but checked when present.
+            let optional: Set<String> = ["monitoring", "network_listener", "package_registry_listener", "install_script_listener"]
+            let present = Set(peek.allKeys.map(\.stringValue))
+            guard present.isSubset(of: optional.union(["ready", "protocol", "engine"])) else { throw EngineFailure.protocolViolation }
+            let registry = try peek.decodeIfPresent(Bool.self, forKey: WireKey("package_registry_listener")) ?? false
+            let scripts = try peek.decodeIfPresent(Bool.self, forKey: WireKey("install_script_listener")) ?? false
+            guard try peek.field("ready", as: Bool.self), try peek.field("protocol", as: Int.self) == 1,
+                  try peek.field("engine", as: String.self) == "rules",
+                  try peek.decodeIfPresent(Bool.self, forKey: WireKey("monitoring")) ?? false == false,
+                  try peek.decodeIfPresent(Bool.self, forKey: WireKey("network_listener")) ?? (registry || scripts) == (registry || scripts) else { throw EngineFailure.notReady }
+            result = .status(EngineStatus(packageRegistryListener: registry, installScriptListener: scripts))
+        } else if peek.contains(WireKey("events")) {
+            let c = try decoder.object(["events"])
+            result = .securityEvents(try Self.events(c))
         } else if peek.contains(WireKey("workflow")) {
             let c = try decoder.object(["workflow"])
             let assessment: WorkflowAssessment = try c.field("workflow")
-            guard assessment.judgment?.isValid != false, assessment.shadowOnly, (0...64).contains(assessment.eventCount), (0...256).contains(assessment.linkCount),
-                  (0...8).contains(assessment.classifiedFields), (0...384).contains(assessment.omittedTextFields), assessment.signals.count <= 16,
-                  assessment.signals.allSatisfy({ ["observed_domain_block", "sensitive_content_label"].contains($0.kind) }) else { throw EngineFailure.protocolViolation }
+            guard assessment.judgment?.isValid != false, assessment.shadowOnly, (0...64).contains(assessment.eventCount),
+                  (0...256).contains(assessment.linkCount) else { throw EngineFailure.protocolViolation }
             result = .workflow(assessment)
         } else if peek.contains(WireKey("workflowCleared")) {
             let c = try decoder.object(["workflowCleared"])
             guard try c.field("workflowCleared", as: Bool.self) else { throw EngineFailure.protocolViolation }
             result = .workflowCleared
-        } else if peek.contains(WireKey("record")) {
-            let c = try decoder.object(["record"]); result = .record(try c.field("record"))
-        } else if peek.contains(WireKey("total")) {
-            let c = try decoder.object(["items", "total"])
-            let items: [SafeRecord] = try c.field("items"); let total: Int = try c.field("total")
-            guard items.count <= 100, total >= items.count else { throw EngineFailure.protocolViolation }
-            result = .recent(items, total: total)
-        } else if peek.contains(WireKey("items")) {
-            let c = try decoder.object(["items"]); let items: [SafePolicy] = try c.field("items")
-            guard items.count <= 32 else { throw EngineFailure.protocolViolation }
-            result = .policies(items)
         } else {
             let c = try decoder.object(["stopped"])
             guard try c.field("stopped", as: Bool.self) else { throw EngineFailure.protocolViolation }

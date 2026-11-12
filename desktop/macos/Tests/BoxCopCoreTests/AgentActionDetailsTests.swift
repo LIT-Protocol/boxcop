@@ -37,7 +37,7 @@ final class AgentActionDetailsTests: XCTestCase {
     func testNotificationCopyNeverIncludesCommandContent() {
         XCTAssertEqual(AgentApprovalCopy.title(application: "claude"), "Claude Code is waiting for your approval")
         let body = AgentApprovalCopy.body(reasons: ["Review destructive actions"])
-        XCTAssertEqual(body, "Destructive action was held for review. Open Approvals in BoxCop to approve or reject it.")
+        XCTAssertEqual(body, "Destructive action was held for review. Open BoxCop to approve or reject it.")
         let id = "6c1f0c58-0000-4000-8000-000000000000"
         XCTAssertEqual(AgentApprovalCopy.requestID(notificationIdentifier: AgentApprovalCopy.notificationIdentifier(id)), id)
         XCTAssertNil(AgentApprovalCopy.requestID(notificationIdentifier: "boxcop-review-x"))

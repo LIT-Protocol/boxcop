@@ -1,4 +1,7 @@
-"""Inherited-pipe desktop policy service; importing never starts a service."""
+"""The BoxCop engine entry point: one-shot argv modes and the app's pipe service.
+
+Importing this module never starts a service.
+"""
 import json
 import math
 import os
@@ -6,11 +9,8 @@ from pathlib import Path
 import re
 import stat
 import sys
-from uuid import uuid4
 
 from .engine import Engine
-from .classification import ContentClassifier, LocalAdvisor
-from .models import EventInput
 from .store import Store
 from .workflow_context import validate_context, WorkflowContextStore
 from .workflow_judgment import WorkflowJudge
@@ -18,14 +18,11 @@ from .workflow_judgment import WorkflowJudge
 
 MAX_LINE_BYTES = 262144  # Includes the terminating LF, on both pipes.
 REQUEST_ID = re.compile(r"[A-Za-z0-9_-]{1,64}")
-BUNDLE_ID = re.compile(r"[A-Za-z0-9][A-Za-z0-9.-]{0,254}")
 ERROR_MESSAGES = {
     "invalid_request": "Invalid request.",
     "line_too_large": "Request line too large.",
     "internal_error": "Internal engine error.",
 }
-COPY_INTENT = "Clipboard change observed while this app was frontmost; copy origin is not verified."
-PASTE_INTENT = "Paste shortcut attempted for this app; insertion and network egress are not confirmed."
 
 
 def _error(code, identifier=None):
@@ -65,9 +62,9 @@ def _validate(request):
         raise ValueError("Invalid version")
     operation = request.get("op")
     shapes = {
-        "status": set(), "policies": set(), "shutdown": set(), "package_protection": {"action"},
-        "script_protection": {"action", "package", "host"},
-        "recent": {"limit"}, "evaluate": {"event"}, "workflow_context": {"context"}, "workflow_clear": set(),
+        "status": set(), "shutdown": set(), "package_protection": {"action"},
+        "script_protection": {"action", "package", "host"}, "security_events": {"limit"},
+        "workflow_context": {"context"}, "workflow_clear": set(),
     }
     if not isinstance(operation, str) or operation not in shapes:
         raise ValueError("Invalid operation")
@@ -82,75 +79,57 @@ def _validate(request):
             raise ValueError("Invalid install-script rule")
     if operation == "workflow_context":
         validate_context(request["context"])
-    if operation == "recent":
-        if type(request["limit"]) is not int or not 1 <= request["limit"] <= 500:
+    if operation == "security_events":
+        if type(request["limit"]) is not int or not 1 <= request["limit"] <= 200:
             raise ValueError("Invalid limit")
-    if operation == "evaluate":
-        event = request["event"]
-        if not isinstance(event, dict) or set(event) != {"kind", "content", "app_bundle_id", "app_pid", "role"}:
-            raise ValueError("Invalid event fields")
-        if event["kind"] not in ("clipboard_copy", "paste_attempt", "paste_prepare") or event["role"] not in ("engineering", "hr", "finance"):
-            raise ValueError("Invalid event enum")
-        bundle = event["app_bundle_id"]
-        if not isinstance(bundle, str) or not BUNDLE_ID.fullmatch(bundle):
-            raise ValueError("Invalid bundle identifier")
-        if type(event["app_pid"]) is not int or event["app_pid"] <= 0:
-            raise ValueError("Invalid process identifier")
-        content = event["content"]
-        if not isinstance(content, str) or len(content) > 4096 or any("\ud800" <= c <= "\udfff" for c in content):
-            raise ValueError("Invalid Unicode scalar content")
 
 
-def _dispatch(request, engine, session_id):
+def _package_runtime(engine):
+    if not hasattr(engine, 'package_runtime'):
+        from .package_runtime import PackageRuntime
+        engine.package_runtime = PackageRuntime()
+    return engine.package_runtime
+
+
+def _script_runtime(engine):
+    if not hasattr(engine, 'script_runtime'):
+        from .package_scripts import ScriptRuntime
+        engine.script_runtime = ScriptRuntime()
+    return engine.script_runtime
+
+
+def _dispatch(request, engine):
     operation = request["op"]
     if operation == "package_protection":
-        if not hasattr(engine, 'package_runtime'):
-            from .package_runtime import PackageRuntime
-            engine.package_runtime = PackageRuntime()
-        return {'packageProtection': engine.package_runtime.command(request['action'])}
+        return {'packageProtection': _package_runtime(engine).command(request['action'])}
     if operation == "script_protection":
-        if not hasattr(engine, 'script_runtime'):
-            from .package_scripts import ScriptRuntime
-            engine.script_runtime = ScriptRuntime()
-        return {'scriptProtection': engine.script_runtime.command(request['action'], request['package'], request['host'])}
+        return {'scriptProtection': _script_runtime(engine).command(request['action'], request['package'], request['host'])}
+    if operation == "security_events":
+        from .local_package_policy import state_directory
+        from .package_scripts import state_directory as script_directory
+        from .security_events import security_events
+        package = getattr(engine, 'package_runtime', None)
+        scripts = getattr(engine, 'script_runtime', None)
+        return {"events": security_events(
+            request["limit"], store=engine.store, data_directory=engine.store.path.parent,
+            package_directory=package.directory if package else state_directory(),
+            script_directory=scripts.directory if scripts else script_directory())}
     if operation == "workflow_clear":
         engine.workflow_context.clear()
         engine.classifier.clear()
         return {"workflowCleared": True}
     if operation == "workflow_context":
-        workflow = engine.workflow_context.accept(request["context"], engine.classifier)
-        outbox = getattr(engine, "team_outbox", None)
-        if outbox is not None:
-            # Queues allowlisted activity only for an active v2 enrollment; never raises.
-            outbox.observe(request["context"])
-        return {"workflow": workflow}
+        return {"workflow": engine.workflow_context.accept(request["context"], engine.classifier)}
     if operation == "status":
         registry = bool(getattr(getattr(engine, "package_runtime", None), "server", None))
         scripts = bool(getattr(getattr(engine, "script_runtime", None), "proxy", None))
-        return {"ready": True, "protocol": 1, "engine": "rules+sequence",
+        return {"ready": True, "protocol": 1, "engine": "rules",
                 "monitoring": False, "network_listener": registry or scripts, **({"package_registry_listener": True} if registry else {}),
-                **({"install_script_listener": True} if scripts else {}), "classification": engine.classifier.stats()}
-    if operation == "policies":
-        return {"items": engine.store.policies()}
-    if operation == "recent":
-        return engine.store.list_events(limit=request["limit"], desktop_only=True)
-    if operation == "shutdown":
-        return {"stopped": True}
-    event = request["event"]
-    copied = event["kind"] == "clipboard_copy"
-    bundle = event["app_bundle_id"]
-    record = engine.evaluate(EventInput(
-        session_id=session_id, actor="human", role=event["role"],
-        action="copy" if copied else "paste", app=bundle,
-        source="app://" + bundle if copied else "",
-        destination="" if copied else "app://" + bundle,
-        content=event["content"], declared_intent=COPY_INTENT if copied else ("Prospective paste policy prepared; no shortcut or transfer observed." if event["kind"] == "paste_prepare" else PASTE_INTENT),
-        synthetic=False,
-    ), retain_preview=False)
-    return {"record": record.model_dump(mode="json")}
+                **({"install_script_listener": True} if scripts else {})}
+    return {"stopped": True}  # shutdown; _validate admits no other operation.
 
 
-def _handle_line(line, engine, session_id):
+def _handle_line(line, engine):
     identifier = None
     try:
         if not line.endswith(b"\n"):
@@ -162,7 +141,7 @@ def _handle_line(line, engine, session_id):
     except (ValueError, RecursionError):
         return _error("invalid_request", identifier), False
     try:
-        result = _dispatch(request, engine, session_id)
+        result = _dispatch(request, engine)
     except Exception:
         # Neither validation details nor underlying SQLite/engine messages are safe.
         return _error("internal_error", identifier), False
@@ -256,7 +235,6 @@ def _private_store(raw_path, *, timeout=10):
 
 
 def _serve(engine):
-    session_id = str(uuid4())
     while True:
         line = sys.stdin.buffer.readline(MAX_LINE_BYTES + 1)
         if not line:
@@ -264,41 +242,15 @@ def _serve(engine):
         if len(line) > MAX_LINE_BYTES:
             _write(_error("line_too_large"))
             return 2  # Do not drain an unbounded or unterminated hostile frame.
-        response, stopped = _handle_line(line, engine, session_id)
-        del line  # Do not retain clipboard text while waiting for the next request.
+        response, stopped = _handle_line(line, engine)
+        del line  # Do not retain request text while waiting for the next request.
         _write(response)
         if stopped:
             return 0
 
 
-class _CorrectionStartup(BaseException):
-    """Bounds the advisory correction entry's import; ordinary handlers cannot catch it."""
-
-
-def _correction(arguments):
-    """Opt-in advisory end-of-turn entry. The deadline is armed before the import,
-    and every failure, including an import failure, prints {} and exits 0."""
-    import signal
-    import time
-    started = time.monotonic()
-
-    def expired(*_):
-        raise _CorrectionStartup()
-    try:
-        try:
-            signal.signal(signal.SIGALRM, expired)
-            signal.setitimer(signal.ITIMER_REAL, 3)
-            from .agent_corrections import main as corrections_main
-            return corrections_main(arguments, started=started)
-        finally:
-            signal.setitimer(signal.ITIMER_REAL, 0)
-    except BaseException:
-        print("{}")
-        return 0
-
-
 def main(argv=None):
-    """Frozen launchers call this directly; no HTTP server or implicit data path."""
+    """Frozen launchers call this directly. There is no HTTP server and no implicit data path."""
     arguments = sys.argv[1:] if argv is None else argv
     if arguments[:1] == ['--human-review']:
         from .human_review import main as review_main
@@ -306,18 +258,15 @@ def main(argv=None):
     if arguments[:1] == ['--package-setup']:
         from tools.package_service import management_main
         return management_main(arguments[1:])
-    if arguments[:1] == ['--package-protection']:
-        from .package_proxy import main as package_main
-        return package_main(arguments[1:])
-    if arguments == ["--classifier-self-test"]:
-        from .classification import self_test
+    if arguments == ["--self-test"]:
+        from .self_test import main as self_test
         return self_test()
-    if arguments and arguments[0] == "--reviewed-transfer":
-        from .reviewed_transfer import main as transfer_main
-        return transfer_main(arguments[1:])
-    if arguments and arguments[0] == "--provider-integrations":
-        from .provider_cli import main as provider_main
-        return provider_main(arguments[1:])
+    if arguments[:1] == ["--protection-status"]:
+        from .self_test import protection_status
+        return protection_status(arguments[1:])
+    if arguments[:1] == ["--contain"]:
+        from .containment import main as contain_main
+        return contain_main(arguments[1:])
     if arguments and arguments[0] == "--software-remediation":
         from .software_remediation import main as remediation_main
         return remediation_main(arguments[1:])
@@ -327,32 +276,15 @@ def main(argv=None):
     if arguments and arguments[0] in {"--host-agent-hook", "--host-agent-integrations"}:
         from .host_agents import main as host_agents_main
         return host_agents_main(arguments)
-    if arguments and arguments[0] == "--host-agent-correction":
-        return _correction(arguments)
-    if arguments and arguments[0] == "--agent-corrections":
-        from .agent_corrections import main as corrections_main
-        return corrections_main(arguments)
-    if arguments and arguments[0] == "--team-desktop":
-        from .team.desktop import main as team_desktop
-        return team_desktop(arguments[1:])
-    if arguments and arguments[0] == "--team-reporting":
-        # Explicitly invoked company-managed reporting; never started by the pipe service.
-        from .team.reporter import main as team_main
-        return team_main(arguments[1:])
     previous_mask = os.umask(0o077)
     try:
         try:
-            args = sys.argv[1:] if argv is None else argv
-            if len(args) != 2 or args[0] != "--data-dir":
+            if len(arguments) != 2 or arguments[0] != "--data-dir":
                 raise ValueError("Invalid startup arguments")
             from .classifier_usage import ClassifierUsage
-            store = _private_store(args[1])
-            usage = ClassifierUsage(store)
-            engine = Engine(store, classifier=ContentClassifier(LocalAdvisor(usage)))
-            from .team.activity import ActivityOutbox, team_reporting_root
-            # Enrollment lives in the main data directory, even for the dedicated reviewer engine.
-            engine.team_outbox = ActivityOutbox(team_reporting_root(args[1]))
-            engine.workflow_context = WorkflowContextStore(WorkflowJudge(usage=usage, on_result=engine.team_outbox.observe_review))
+            store = _private_store(arguments[1])
+            engine = Engine(store)
+            engine.workflow_context = WorkflowContextStore(WorkflowJudge(usage=ClassifierUsage(store)))
         except Exception:
             sys.stderr.write("BoxCop engine could not start.\n")
             return 2
@@ -365,7 +297,6 @@ def main(argv=None):
                 engine.package_runtime.close()
             if hasattr(engine, 'script_runtime'):
                 engine.script_runtime.close()
-            engine.classifier.close()
             engine.workflow_context.judge.close()
     finally:
         os.umask(previous_mask)

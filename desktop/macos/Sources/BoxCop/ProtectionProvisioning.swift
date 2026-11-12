@@ -4,6 +4,7 @@ import BoxCopCore
 import SystemExtensions
 import NetworkExtension
 
+/// Where a network setup request stands with macOS.
 enum NetworkSetupPhase: Equatable { case idle, extensionApproval, filterApproval, declined, failed(String) }
 
 /// macOS owns installation/approval. No sudo scripts or SIP changes on customer Macs.
@@ -13,17 +14,12 @@ enum NetworkSetupPhase: Equatable { case idle, extensionApproval, filterApproval
     private var activationFailure: String?
     var update: (String) -> Void = { _ in }
     var phaseChanged: (NetworkSetupPhase) -> Void = { _ in }
-    var available: Bool {
-        ReleaseProfile.resolve(bundleProfile: Bundle.main.object(forInfoDictionaryKey: "BoxCopReleaseProfile") as? String, arguments: []).usesStandaloneNetworkProtection &&
-        [NetworkFilterControl.identifier].allSatisfy {
-            FileManager.default.fileExists(atPath: Bundle.main.bundleURL.appendingPathComponent("Contents/Library/SystemExtensions/\($0).systemextension").path)
-        }
-    }
+    var available: Bool { NetworkFilterControl.bundled }
     var setupIssue: String? {
         if Bundle.main.bundleURL.deletingLastPathComponent().path != "/Applications" {
-            return "Move BoxCop to Applications, then open it there to set up network protection."
+            return "Move BoxCop to Applications, then open it there to set up outbound control."
         }
-        if !available { return "This copy of BoxCop does not include network protection. Install the full BoxCop app in Applications, then reopen it." }
+        if !available { return "This build does not include the network extension." }
         return nil
     }
     func activate(_ identifier: String) async -> Bool {
@@ -53,10 +49,10 @@ enum NetworkSetupPhase: Equatable { case idle, extensionApproval, filterApproval
             configuration.filterSockets = true; configuration.filterPackets = false
             configuration.filterDataProviderBundleIdentifier = NetworkFilterControl.identifier
             manager.providerConfiguration = configuration
-            manager.localizedDescription = "BoxCop network protection"
+            manager.localizedDescription = "BoxCop outbound control"
             manager.isEnabled = true
             try await manager.saveToPreferences()
-            update("Network filtering enabled for all apps. Check Connections for live threat-blocking status.")
+            update("Outbound control is on for all apps.")
             phaseChanged(.idle)
             return true
         } catch {
@@ -104,7 +100,7 @@ enum NetworkSetupPhase: Equatable { case idle, extensionApproval, filterApproval
     nonisolated func request(_ request: OSSystemExtensionRequest, didFinishWithResult result: OSSystemExtensionRequest.Result) {
         Task { @MainActor in
         if result != .completed { activationFailure = "macOS requires a restart to finish this change." }
-        update(activationFailure ?? "System extension request completed. Check service readiness below.")
+        update(activationFailure ?? "")
         finish(result == .completed)
         }
     }
@@ -161,5 +157,4 @@ enum NetworkSetupPhase: Equatable { case idle, extensionApproval, filterApproval
     }
     nonisolated func request(_ request: OSSystemExtensionRequest, actionForReplacingExtension existing: OSSystemExtensionProperties, withExtension ext: OSSystemExtensionProperties) -> OSSystemExtensionRequest.ReplacementAction { .cancel }
 }
-import BoxCopCore
 #endif

@@ -142,57 +142,6 @@ def download_then_execute(text: str) -> bool:
     return False
 
 
-RM_COMMAND = re.compile(r"(?<![\w.-])rm\b([^\n;&|]*)", re.I)
-SYSTEM_ROOTS = frozenset({
-    "etc", "usr", "bin", "sbin", "lib", "lib32", "lib64", "boot", "var", "opt", "srv",
-    "root", "sys", "proc", "dev", "snap", "System", "Library", "Applications",
-})
-WHOLE_TREE = frozenset({"", "/", "/*", "*"})
-
-
-def _catastrophic_target(raw):
-    target = raw.replace('"', "").replace("'", "")
-    variable = re.fullmatch(r"\$\{?([A-Za-z_][A-Za-z0-9_]*)\}?(.*)", target)
-    if variable:
-        # An unset/empty variable can turn "$DIR/" or "$DIR/*" into the root.
-        return variable[2] in WHOLE_TREE - {""} or variable[1] == "HOME" and variable[2] in WHOLE_TREE
-    if target == "~" or target.startswith("~/") and target[2:] in WHOLE_TREE:
-        return True
-    parts = [part for part in target.split("/") if part not in {"", "."}]
-    if parts and parts[-1] == "*":
-        parts = parts[:-1]
-    if not target.startswith("/"):
-        # Current/parent directory itself (., .., ./*, ../..), not named subpaths.
-        return all(part == ".." for part in parts) and (target != "" and (not parts or target.strip("./*") == ""))
-    if ".." in parts or len(parts) <= 1:
-        return True
-    return len(parts) <= 2 and (parts[0] in SYSTEM_ROOTS or parts[0] in {"home", "Users"})
-
-
-def recursive_delete(text: str):
-    """Return "catastrophic", "routine", or None for recursive forced rm text."""
-    result = None
-    for match in RM_COMMAND.finditer(text):
-        tokens = match.group(1).split()
-        options, targets, end_of_options = [], [], False
-        for token in tokens:
-            if not end_of_options and token == "--":
-                end_of_options = True
-            elif not end_of_options and token.startswith("-") and token != "-":
-                options.append(token)
-            else:
-                targets.append(token)
-        short = "".join(option[1:] for option in options if not option.startswith("--")).lower()
-        recursive = "r" in short or "--recursive" in options
-        force = "f" in short or "--force" in options
-        if not (recursive and force):
-            continue
-        if "--no-preserve-root" in options or any(_catastrophic_target(target) for target in targets):
-            return "catastrophic"
-        result = "routine"
-    return result
-
-
 # Conventional credential stores, by path. Identity *use* (ssh -i, IdentityFile,
 # curl --key/--cert) authenticates with a key instead of sending the file, so it
 # is excluded. Public keys, known_hosts, authorized_keys and ssh config are not

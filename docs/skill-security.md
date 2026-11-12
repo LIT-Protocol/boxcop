@@ -1,13 +1,14 @@
-# Skill and agent instruction checks
+# Install gate: skill and instruction file checks
 
-BoxCop now includes original offline checks informed by the threat categories in
-[NVIDIA SkillSpector](https://github.com/NVIDIA/SkillSpector). It does not install,
-invoke or vendor SkillSpector, and does not claim its full coverage.
+Skills and agent instruction files are things an agent "installs" into its own
+behaviour. BoxCop checks them offline with original checks informed by the threat
+categories in [NVIDIA SkillSpector](https://github.com/NVIDIA/SkillSpector). It
+does not install, invoke or vendor SkillSpector, and does not claim its coverage.
 
 Four default-enabled policies hold agent file reads/writes whose supplied content
 matches instruction overrides, concealed actions, credential-store exfiltration,
-or fetch/decode-to-execution and download-then-execute patterns. These appear in
-the existing policy list and decision audit. Reasons are fixed text; scanned
+or fetch/decode-to-execution and download-then-execute patterns. A hold appears
+in the app's Events list and in the decision audit. Reasons are fixed text; scanned
 content is not retained in the audit.
 
 ## Where the checks run
@@ -20,8 +21,6 @@ content is not retained in the audit.
   path-only checks.
 - Existing agent Write/Edit events inspect the supplied new content. An Edit is
   only a fragment, not a scan of the resulting file.
-- Other callers submitting agent read/write events receive the same policies.
-  Ordinary human copy/paste is not treated as agent instructions.
 
 Registered hooks must actually be called for a hold to take effect. Skill loading
 that bypasses hooks, shell-based file reads, Cursor attachment content, MCP tool
@@ -60,8 +59,8 @@ Patterns are deliberately narrow and can miss paraphrases, encodings, dynamic
 behavior and payloads split across files. Quoted examples and negated instructions
 can produce false positives. There is no semantic model, AST/taint analysis,
 recursive archive extraction, dependency resolution, CVE lookup, MCP permission
-analysis or automatic quarantine in this slice. Existing command protections
-continue to operate independently. Review the source of a finding before changing
+analysis or automatic quarantine. The command checks described in
+[agent action checks](host-agent-protection.md) operate independently. Review the source of a finding before changing
 policy settings; disabling a policy affects all events using that policy.
 
 Tests use synthetic content and actual local hook subprocesses. They do not

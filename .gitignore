@@ -1,0 +1,20 @@
+.venv
+.local/
+__pycache__/
+.pytest_cache/
+*.pyc
+node_modules/
+web/dist/
+.env
+research/ent-site/
+artifacts/private/
+desktop/macos/.build/
+desktop/macos/.build-artifacts/
+desktop/macos/.swiftpm/
+desktop/macos/dist/
+
+# macOS Finder metadata
+.DS_Store
+
+# Local feed downloads, agent logs and isolated review worktrees
+.context/

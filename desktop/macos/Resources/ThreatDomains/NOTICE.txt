@@ -1,0 +1,10 @@
+HaGeZi Threat Intelligence Feeds Mini
+Copyright HaGeZi and contributors. Data licensed under GPL-3.0; see LICENSE.
+https://github.com/hagezi/dns-blocklists
+
+The accompanying domains.txt and LICENSE are unmodified upstream files at the
+revision recorded in manifest.json. They are distributed as separate data.
+Allay uses exact-host matches only, not the broader subdomain matching used by
+many DNS blockers. The source data is included in full in this directory.
+Snapshot updates ship with Allay releases; there are no automatic feed downloads.
+No warranty. Report incorrect listings: https://github.com/hagezi/dns-blocklists/issues

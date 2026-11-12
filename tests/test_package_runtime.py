@@ -1,0 +1,125 @@
+import base64
+import threading
+import time
+
+import httpx
+from cryptography.hazmat.primitives.asymmetric.ed25519 import Ed25519PrivateKey
+
+from server.package_intelligence import build_payload, datadog_records, now, sign
+from server.package_runtime import PackageRuntime
+from server.package_routing import status as routing_status
+from tools.package_service import provision
+
+
+def fixture(tmp_path, monkeypatch, *, refresh=None):
+    key = Ed25519PrivateKey.generate()
+    public = key.public_key().public_bytes_raw()
+    channel = dict(schema='boxcop.package-channel.v1', url='https://feed.invalid/policy',
+                   public_key=base64.b64encode(public).decode(), minimum_sequence=1)
+    directory = tmp_path / 'state'
+    provision(directory, sign(build_payload(list(datadog_records({'bad-fixture': ['1.0.0']}, 'npm')), 1,
+                                          {'fixture': {'fetched_at': now()}}), key), public)
+    monkeypatch.setattr('server.package_runtime.refresh', refresh or (lambda *_: None))
+    return PackageRuntime(home=tmp_path, directory=directory, channel=channel, port=0, migrate=lambda _: None)
+
+
+def idle(runtime):
+    deadline = time.monotonic() + 5
+    while runtime.status()['busy']:
+        assert time.monotonic() < deadline
+        time.sleep(.01)
+    return runtime.status()
+
+
+def test_ready_while_refresh_is_blocked_and_quit_keeps_routing(tmp_path, monkeypatch):
+    entered, finish = threading.Event(), threading.Event()
+    def slow(*_):
+        entered.set()
+        finish.wait(10)
+    runtime = fixture(tmp_path, monkeypatch, refresh=slow)
+    try:
+        runtime.command('enable')
+        assert idle(runtime)['active']
+        assert entered.wait(2)
+        port = runtime.server.server_port
+        with httpx.Client(trust_env=False) as client:
+            assert client.get(f'http://127.0.0.1:{port}/npm/bad-fixture/1.0.0').status_code == 403
+        runtime.close()
+        assert runtime.server is None
+        assert routing_status(tmp_path)['configured']
+        with httpx.Client(trust_env=False, timeout=.2) as client:
+            import pytest
+            with pytest.raises(httpx.ConnectError):
+                client.get(f'http://127.0.0.1:{port}/status')
+    finally:
+        finish.set()
+        runtime.close()
+
+
+def test_failed_enable_can_retry_and_disable_restores_config(tmp_path, monkeypatch):
+    runtime = fixture(tmp_path, monkeypatch)
+    config = tmp_path / '.npmrc'
+    config.write_text('registry=https://private.invalid/\n')
+    try:
+        runtime.command('enable')
+        failed = idle(runtime)
+        assert not failed['active'] and not failed['busy']
+        assert 'custom registry' in failed['summary']
+        assert runtime.server is None
+        config.write_text('fund=false\n')
+        runtime.command('enable')
+        assert idle(runtime)['active']
+        runtime.command('disable')
+        assert not idle(runtime)['routed']
+        assert config.read_text() == 'fund=false\n'
+        assert runtime.server is None
+    finally:
+        runtime.close()
+
+
+def test_relaunch_restores_previously_enabled_routing(tmp_path, monkeypatch):
+    runtime = fixture(tmp_path, monkeypatch)
+    runtime.command('enable')
+    assert idle(runtime)['active']
+    runtime.close()
+    restarted = PackageRuntime(home=tmp_path, directory=runtime.directory, channel=runtime.channel,
+                               port=0, migrate=lambda _: None)
+    try:
+        restarted.command('status')
+        assert idle(restarted)['active']
+    finally:
+        restarted.close()
+
+
+def test_normal_status_does_not_enable_routing(tmp_path, monkeypatch):
+    runtime = fixture(tmp_path, monkeypatch)
+    try:
+        runtime.command('status')
+        assert not idle(runtime)['routed']
+        assert runtime.server is None
+    finally:
+        runtime.close()
+
+
+def test_migration_removes_only_the_legacy_job(tmp_path, monkeypatch):
+    import plistlib
+    from types import SimpleNamespace
+    from server.package_runtime import remove_legacy_agent
+    path = tmp_path / 'Library/LaunchAgents/com.boxcop.package-protection.plist'
+    path.parent.mkdir(parents=True)
+    path.write_bytes(plistlib.dumps({'Label': 'com.boxcop.package-protection',
+                                    'ProgramArguments': ['/Applications/BoxCop.app/engine', '--package-protection']}))
+    calls = []
+    def run(args, **kwargs):
+        calls.append(args)
+        assert kwargs['timeout'] == 10
+        return SimpleNamespace(returncode=0)
+    monkeypatch.setattr('server.package_runtime.subprocess.run', run)
+    remove_legacy_agent(tmp_path)
+    assert calls[0][1] == 'bootout'
+    assert not path.exists()
+    path.write_bytes(plistlib.dumps({'Label': 'another-job'}))
+    import pytest
+    with pytest.raises(ValueError, match='changed'):
+        remove_legacy_agent(tmp_path)
+    assert path.exists()

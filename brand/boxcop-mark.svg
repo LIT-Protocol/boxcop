@@ -1,0 +1,19 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 512 512" role="img" aria-label="BoxCop">
+  <!-- BoxCop mark: an isometric box wearing a badge. -->
+  <g stroke-linejoin="round">
+    <!-- top face -->
+    <path d="M256 60 432 150 256 240 80 150Z" fill="#7FB0FF" stroke="#0A1730" stroke-width="20"/>
+    <!-- left face -->
+    <path d="M80 150 256 240V452L80 362Z" fill="#2F6BFF" stroke="#0A1730" stroke-width="20"/>
+    <!-- right face -->
+    <path d="M432 150 256 240V452L432 362Z" fill="#1B47C9" stroke="#0A1730" stroke-width="20"/>
+    <!-- tape across the top -->
+    <path d="M150 114 326 204 362 186 186 96Z" fill="#0A1730"/>
+  </g>
+  <!-- badge: shield on the left face (sheared to sit on the face) -->
+  <g transform="matrix(1.12 0.573 0 1.12 168 232)">
+    <path d="M0 14C-22 14-40 8-54 0V52C-54 88-32 112 0 126 32 112 54 88 54 52V0C40 8 22 14 0 14Z"
+          fill="#FFC53D" stroke="#0A1730" stroke-width="14" stroke-linejoin="round"/>
+    <path d="M0 34 9.4 55 32 57.6 15 73 20 95.5 0 84 -20 95.5 -15 73 -32 57.6 -9.4 55Z" fill="#0A1730"/>
+  </g>
+</svg>

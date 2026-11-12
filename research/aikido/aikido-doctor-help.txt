@@ -1,0 +1,138 @@
+##### aikido-doctor request --help
+NAME:
+   aikido-doctor request - List packages blocked pending approval, and ask your admin to approve them
+
+USAGE:
+   aikido-doctor request [command options]
+
+OPTIONS:
+   --json                               Print machine-readable NDJSON (one package per line) instead of a table (default: false)
+   --package value [ --package value ]  Request this package name (repeatable, or comma-separated)
+   --event value [ --event value ]      Request the package of this blocked event id: the full id, or a prefix only one event has
+   --yes, -y                            Request every package that is still waiting, without prompting (default: false)
+   --help, -h                           show help
+##### aikido-doctor sbom --help
+NAME:
+   aikido-doctor sbom - Inspect the software bill of materials (SBOM) collection
+
+USAGE:
+   aikido-doctor sbom [command options]
+
+COMMANDS:
+   generate  Run an SBOM collection now, report what each package manager found or failed on, and submit it to Aikido
+   help, h   Shows a list of commands or help for one command
+
+OPTIONS:
+   --help, -h  show help
+##### aikido-doctor secretscanning --help
+NAME:
+   aikido-doctor secretscanning - Inspect shell-history secret scanning
+
+USAGE:
+   aikido-doctor secretscanning [command options]
+
+COMMANDS:
+   status   Show whether secret scanning is enabled, which history files it would scan, and what the daemon last did
+   run      Scan the shell history files now and print what was found (read-only; never modifies history)
+   rewrite  Erase secrets from one history file, as the tray UI does (MODIFIES the file)
+   help, h  Shows a list of commands or help for one command
+
+OPTIONS:
+   --help, -h  show help
+##### aikido-doctor lockdown --help
+NAME:
+   aikido-doctor lockdown - Manage the network lockdown requested from the Aikido dashboard
+
+USAGE:
+   aikido-doctor lockdown [command options]
+
+COMMANDS:
+   release  Release the current lockdown on this device, e.g. when it can't reach Aikido
+   help, h  Shows a list of commands or help for one command
+
+OPTIONS:
+   --help, -h  show help
+##### aikido-doctor certconfig --help
+NAME:
+   aikido-doctor certconfig - Manage per-tool certificate trust configuration (node, git, java, etc.)
+
+USAGE:
+   aikido-doctor certconfig [command options]
+
+COMMANDS:
+   list             List certconfig rules, what they configure, and their current state
+   disable          Disable a certconfig rule and uninstall its trust configuration (use "all" for every rule)
+   disable-repairs  Stop automatic drift repair for a certconfig rule, without uninstalling it (use "all" for every rule)
+   enable           Re-enable a certconfig rule and re-install its trust configuration (use "all" for every rule)
+   repair           Check a certconfig rule for drift and reinstall it if needed (use "all" for every rule)
+   refresh          Reinstall every enabled certconfig rule and rebuild its CA bundles now, whether or not drift was detected
+   adopt            Adopt an extra CA from a PEM file into the CA bundles we build (node, npm, pip, git, ruby, curl, nix, bazel), so tools pointed at them keep trusting it
+   help, h          Shows a list of commands or help for one command
+
+OPTIONS:
+   --help, -h  show help
+##### aikido-doctor pause --help
+NAME:
+   aikido-doctor pause - Pause Aikido Device Protection for a specified duration
+
+USAGE:
+   aikido-doctor pause [command options]
+
+OPTIONS:
+   --hours value  Number of hours to pause protection (default: 1)
+   --help, -h     show help
+##### aikido-doctor certs --help
+NAME:
+   aikido-doctor certs - Manage CA certificates
+
+USAGE:
+   aikido-doctor certs [command options]
+
+COMMANDS:
+   refresh              Re-download and re-install the proxy CA certificate into the system keychain
+   force-renew-managed  Force an immediate renewal of the managed PKI leaf certificate
+   time-encoding        Report how certificate validity dates are encoded, and optionally align our trust anchors to RFC 5280 UTCTime (for TLS stacks that enforce it, such as LibreSSL)
+   help, h              Shows a list of commands or help for one command
+
+OPTIONS:
+   --help, -h  show help
+##### aikido-doctor proxy --help
+NAME:
+   aikido-doctor proxy - Route the agent's own fetches through a corporate proxy instead of direct
+
+USAGE:
+   aikido-doctor proxy [command options]
+
+COMMANDS:
+   show     Show the proxy settings
+   on       The daemon's own fetches (cloud, log upload, updates) go through an explicit HTTP proxy
+   off      Own fetches go direct again (default)
+   help, h  Shows a list of commands or help for one command
+
+OPTIONS:
+   --help, -h  show help
+##### aikido-doctor device-identity --help
+NAME:
+   aikido-doctor device-identity - Inspect or reset the device this machine reports as
+
+USAGE:
+   aikido-doctor device-identity [command options]
+
+COMMANDS:
+   show     Show the ID this machine reports under and where it comes from
+   reset    Issue this machine a new device ID, after cloning a machine that already had the agent installed
+   help, h  Shows a list of commands or help for one command
+
+OPTIONS:
+   --help, -h  show help
+##### aikido-doctor diagnostics --help
+NAME:
+   aikido-doctor diagnostics - Collect and submit diagnostics to Aikido
+
+USAGE:
+   aikido-doctor diagnostics [command options]
+
+OPTIONS:
+   --note value       Attach a note describing the issue to the report
+   --non-interactive  Skip the interactive prompt/progress view (for scripts and CI) (default: false)
+   --help, -h         show help

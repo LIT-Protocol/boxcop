@@ -1,0 +1,12 @@
+fastapi
+uvicorn
+pydantic
+httpx
+pytest
+numpy
+onnxruntime
+tokenizers
+huggingface_hub
+cryptography==50.0.2
+packaging==26.3
+semantic-version==2.10.0

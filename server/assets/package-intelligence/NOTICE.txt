@@ -1,0 +1,21 @@
+BoxCop package intelligence contains adapted package metadata from:
+
+OpenSSF malicious-packages contributors
+https://github.com/ossf/malicious-packages
+Apache License 2.0
+
+GitHub Advisory Database contributors
+https://github.com/github/advisory-database
+Creative Commons Attribution 4.0 International (CC-BY-4.0)
+
+Datadog Security Labs, Malicious Software Packages Dataset
+https://github.com/DataDog/malicious-software-packages-dataset
+Apache License 2.0
+
+BoxCop normalizes package identifiers and version selectors, preserves report
+identifiers, and applies a conservative blocking/review policy. These are
+modifications to upstream data, not endorsements by the source organizations.
+Original report and source links are preserved in each signed snapshot.
+OSV may transport OpenSSF records; it is not counted as an independent detector.
+
+No malicious software sample archives are included or needed.

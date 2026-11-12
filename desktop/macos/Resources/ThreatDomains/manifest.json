@@ -1,0 +1,11 @@
+{
+  "source": "HaGeZi Threat Intelligence Feeds Mini",
+  "revision": "cb6dfce84b8f86611ca428e6b6994f7499fcb32e",
+  "retrievedAt": "2026-11-09T22:43:29.616472+00:00",
+  "publishedAt": "2026-11-09T15:10:00Z",
+  "sourceURL": "https://raw.githubusercontent.com/hagezi/dns-blocklists/cb6dfce84b8f86611ca428e6b6994f7499fcb32e/wildcard/tif.mini-onlydomains.txt",
+  "sha256": "2f3a28c89bd7a566ff04ecc6ffeacb767fd44b019fb661a45578fd0567c05e43",
+  "license": "GPL-3.0",
+  "matching": "exact hostname only",
+  "count": 187113
+}

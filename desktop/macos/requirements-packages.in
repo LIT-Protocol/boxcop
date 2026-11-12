@@ -1,0 +1,5 @@
+# Offline malware matching, signed updates and the optional registry helper.
+cryptography==50.0.2
+packaging==26.3
+semantic-version==2.10.0
+httpx==0.28.1

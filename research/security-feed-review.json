@@ -1,0 +1,946 @@
+{
+  "schema": "allay.security-feed-review.v1",
+  "items": [
+    {
+      "id": "pwn:https://pwn.watch/i/adobe-commerce-magento-blockstrap-cve-2026-103849",
+      "fingerprint": "b31ac51a44d62e89306411e9d5e0bfe25eb8897f49902c74b9eb728bb7ccb674",
+      "status": "partial",
+      "rationale": "Local metadata advisory gap addressed on 2026-11-03 through Composer product-community-edition/product-enterprise-edition metadata, with primary-reviewed ranges/baselines and discovery, fixed/unknown and hostile-input regressions. Findings remain advisory only. Ordinary numeric and -p releases remain unresolved because isolated patches can leave product metadata unchanged; live stores and patch provenance are not verified.",
+      "evidence": [
+        "server/feed_advisories.py",
+        "server/inventory_metadata.py",
+        "server/software_inventory.py",
+        "tests/test_feed_advisories_extended.py",
+        "research/security-feed-next-dozen-coverage.md",
+        "https://www.adobe.com/trust/security/products/commerce/apsb26-153.html"
+      ]
+    },
+    {
+      "id": "pwn:https://pwn.watch/i/android-sms-of-death-wap-push-dos-cve-2026-58882",
+      "fingerprint": "e41b486af36aacf141ba7fc25f6bbd2ff0bc58636141b39ff3aad8a3db6c1c57",
+      "status": "out_of_scope",
+      "rationale": "Android telephony is outside this macOS endpoint product. Carrier/device patch verification requires an Android control plane; no Allay prevention is asserted.",
+      "evidence": [
+        "server/software_inventory.py",
+        "server/exposure_advisories.py",
+        "https://source.android.com/docs/security/bulletin/2026/2026-11-01"
+      ]
+    },
+    {
+      "id": "pwn:https://pwn.watch/i/atlantis-0-49-0-security-fixes-fork-bypass-rce-oct-2026",
+      "fingerprint": "de3571d9ee0d7a82c8b122e39de2b2ca67dbab47166307b9b34b85145a0cf88d",
+      "status": "partial",
+      "rationale": "Local installation advisory gap addressed on 2026-11-03 via Homebrew core Atlantis receipts, with primary-reviewed version checks and discovery/update/unknown/benign regressions. Findings are advisory only; no exploit prevention is asserted. Webhook secrets, workflows and remote/container deployments are not inspected; upgrade breaking changes need operator review.",
+      "evidence": [
+        "server/feed_advisories.py",
+        "server/software_inventory.py",
+        "tests/test_feed_advisories.py",
+        "research/security-feed-dozen-coverage.md",
+        "https://github.com/runatlantis/atlantis/releases/tag/v0.49.0"
+      ]
+    },
+    {
+      "id": "pwn:https://pwn.watch/i/avada-theme-form-upload-rce-cve-2026-115346",
+      "fingerprint": "32a306676d9c69ae22d04252b480478c1c7847c2edc4530aa61a606d9cdb4a57",
+      "status": "partial",
+      "rationale": "Local metadata advisory gap addressed on 2026-11-03 through Avada theme header candidates with vendor URI and child-theme exclusion, with primary-reviewed ranges/baselines and discovery, fixed/unknown and hostile-input regressions. Findings remain advisory only. Theme headers remain untrusted; active forms, upload execution, remote sites and prior persistence are not verified.",
+      "evidence": [
+        "server/feed_advisories.py",
+        "server/inventory_metadata.py",
+        "server/software_inventory.py",
+        "tests/test_feed_advisories_extended.py",
+        "research/security-feed-next-dozen-coverage.md",
+        "https://avada.com/blog/version-7-16-4-security-update/"
+      ]
+    },
+    {
+      "id": "pwn:https://pwn.watch/i/beyondtrust-remote-support-cve-2026-102764",
+      "fingerprint": "131359055d13ac60edab1eb052d7a3a935660eac5a45f52ac898e8b9bb01be33",
+      "status": "out_of_scope",
+      "rationale": "Reviewed 2026-11-03; scope correction, not protection: Appliance-side Remote Support vulnerability; the local Mac console is not the affected service. Asset owner must verify BT26-05-RS patch application and investigate compromise.",
+      "evidence": [
+        "research/security-feed-remaining-coverage.md",
+        "docs/software-exposure.md",
+        "https://www.beyondtrust.com/trust-center/security-advisories/bt26-05"
+      ]
+    },
+    {
+      "id": "pwn:https://pwn.watch/i/bitcoin-core-ai-found-node-crash-bugs-oct-2026",
+      "fingerprint": "1c3aadd2eef10e3eb6b7144090c0a85bf526079855de071a1dc0acf0b63b2cc9",
+      "status": "partial",
+      "rationale": "Local installation advisory gap addressed on 2026-11-03 via Homebrew core Bitcoin receipts, with primary-reviewed version checks and discovery/update/unknown/benign regressions. Findings are advisory only; no exploit prevention is asserted. This check covers the non-Linux TCP urgent-data update baseline only; the other feed-reported bugs, app bundles, running nodes and filesystem/architecture constraints remain separate.",
+      "evidence": [
+        "server/feed_advisories.py",
+        "server/software_inventory.py",
+        "tests/test_feed_advisories.py",
+        "research/security-feed-dozen-coverage.md",
+        "https://bitcoincore.org/en/2026/10/28/disclose-tcp-oom/"
+      ]
+    },
+    {
+      "id": "pwn:https://pwn.watch/i/chrome-156-security-update-oct-2026",
+      "fingerprint": "9c46fa018ef5416c50a3a94c1b78c5da5e78a633f379eab7cc53af500f5f293d",
+      "status": "partial",
+      "rationale": "Updated the macOS Chrome inventory baseline to 156.0.8078.79/.80 against Google's October 29 release note. App metadata regressions cover old/fixed builds; this does not mediate browser exploitation or verify running processes.",
+      "evidence": [
+        "server/software_inventory.py",
+        "server/exposure_advisories.py",
+        "tests/test_software_inventory.py",
+        "https://chromereleases.googleblog.com/2026/10/stable-channel-update-for-desktop_02107719452.html",
+        "https://pwn.watch/i/chrome-156-security-update-oct-2026"
+      ]
+    },
+    {
+      "id": "pwn:https://pwn.watch/i/clickhouse-server-unauth-rce-cve-2026-116366",
+      "fingerprint": "7317d1542f4ee467131d22ebaac2289de3704c3ec7224840cf64163a8f64aec3",
+      "status": "partial",
+      "rationale": "Local metadata advisory gap addressed on 2026-11-03 through Homebrew cask install receipts, with primary-reviewed ranges/baselines and discovery, fixed/unknown and hostile-input regressions. Findings remain advisory only. Server mode, running binaries, container/remote deployments and cloud status are not verified.",
+      "evidence": [
+        "server/feed_advisories.py",
+        "server/inventory_metadata.py",
+        "server/software_inventory.py",
+        "tests/test_feed_advisories_extended.py",
+        "research/security-feed-next-dozen-coverage.md",
+        "https://clickhouse.com/docs/resources/changelogs/security-changelog"
+      ]
+    },
+    {
+      "id": "pwn:https://pwn.watch/i/cloudflare-workers-ai-glm-5-3-sglang-kv-cache-cross-tenant-leak",
+      "fingerprint": "7aa058a28cf94ac1ec54a00c8f8f9cabe58cb8bc13bbd2a7c7e8003dcd62fb24",
+      "status": "partial",
+      "rationale": "Local installation advisory gap addressed on 2026-11-03 via Python sglang metadata, with primary-reviewed version checks and discovery/update/unknown/benign regressions. Findings are advisory only; no exploit prevention is asserted. Only local dependencies are assessed; GPU KV-pool configuration, remote deployments and Cloudflare tenant isolation are outside this check.",
+      "evidence": [
+        "server/feed_advisories.py",
+        "server/software_inventory.py",
+        "tests/test_feed_advisories.py",
+        "research/security-feed-dozen-coverage.md",
+        "https://blog.cloudflare.com/kv-cache-exposure-remediation/"
+      ]
+    },
+    {
+      "id": "pwn:https://pwn.watch/i/drupal-commerce-core-access-bypass-cve-2026-118539",
+      "fingerprint": "56b7b6197cc6af5649a94ceaf53aca7d20cc9e43c8d0004c3ba3af7d52b086d2",
+      "status": "partial",
+      "rationale": "Local metadata advisory gap addressed on 2026-11-03 through Composer drupal/commerce installed metadata, with primary-reviewed ranges/baselines and discovery, fixed/unknown and hostile-input regressions. Findings remain advisory only. Active routes, remote stores and order integrity still need operator review; Drupal core updates alone do not fix Commerce.",
+      "evidence": [
+        "server/feed_advisories.py",
+        "server/inventory_metadata.py",
+        "server/software_inventory.py",
+        "tests/test_feed_advisories_extended.py",
+        "research/security-feed-next-dozen-coverage.md",
+        "https://www.drupal.org/sa-contrib-2026-254"
+      ]
+    },
+    {
+      "id": "pwn:https://pwn.watch/i/drupal-core-field-ui-rce-cve-2026-108097",
+      "fingerprint": "06042d219533e35062a0ead065c13d6acc497de489453efadd683d1d1afb90ee",
+      "status": "partial",
+      "rationale": "Local installation advisory gap addressed on 2026-11-03 via Composer vendor/composer/installed.json, with primary-reviewed version checks and discovery/update/unknown/benign regressions. Findings are advisory only; no exploit prevention is asserted. Enabled Field UI/contributed modules, custom vendor directories, Drupal 12 prereleases and deployed sites require separate review.",
+      "evidence": [
+        "server/feed_advisories.py",
+        "server/software_inventory.py",
+        "tests/test_feed_advisories.py",
+        "research/security-feed-dozen-coverage.md",
+        "https://www.drupal.org/sa-core-2026-014"
+      ]
+    },
+    {
+      "id": "pwn:https://pwn.watch/i/edk2-pxe-icmp-preboot-rce-cve-2026-97631",
+      "fingerprint": "e93acd4d463b5ff66cc8e27bfaf0f9837a6186b4c912267a2abb7eb8a78fb72f",
+      "status": "out_of_scope",
+      "rationale": "UEFI PXE pre-boot execution is outside Allay's macOS user-space and agent-hook boundary. Follow the hardware vendor's firmware guidance; application rules cannot establish firmware remediation.",
+      "evidence": [
+        "server/software_inventory.py",
+        "server/exposure_advisories.py",
+        "https://raw.githubusercontent.com/CVEProject/cvelistV5/main/cves/2026/97xxx/CVE-2026-97631.json"
+      ]
+    },
+    {
+      "id": "pwn:https://pwn.watch/i/electrum-malicious-server-rbf-fee-bump-theft",
+      "fingerprint": "18c152ab9f2d8b2107d7de90b4fa34a13ec358c46090b397fc781574eaa1d731",
+      "status": "partial",
+      "rationale": "Electrum app inventory advises upgrading before the reviewed fee-bump fix. Allay does not validate signed transaction outputs or mediate wallet signing; independently verify the transaction.",
+      "evidence": [
+        "server/software_inventory.py",
+        "server/exposure_advisories.py",
+        "tests/test_software_inventory.py",
+        "https://github.com/spesmilo/electrum/security/advisories/GHSA-6jp4-8v48-cc5v"
+      ]
+    },
+    {
+      "id": "pwn:https://pwn.watch/i/embrace-ai-assistant-embedded-browsers-oct-2026",
+      "fingerprint": "af11d2830ab1bd8334ab6d2cdbc8217c2d437694ca8f1e52b5f300b49f3606ca",
+      "status": "partial",
+      "rationale": "Reviewed 2026-11-03: Exact app-bundle discovery adds an unresolved embedded-browser review for Cursor, VS Code, Claude Desktop and Codex. Browser navigation, local-file reads and Copilot extension patch status remain unmediated and unverified.",
+      "evidence": [
+        "server/remaining_advisories.py",
+        "server/deployment_metadata.py",
+        "server/software_inventory.py",
+        "tests/test_feed_advisories_remaining.py",
+        "research/security-feed-remaining-coverage.md"
+      ]
+    },
+    {
+      "id": "pwn:https://pwn.watch/i/epics-base-7-0-11-critical-memory-bugs-oct-2026",
+      "fingerprint": "2b544c64c7cef2943ba5d41e06a6b18d149edaf67a216702c4638fbd9621bad3",
+      "status": "partial",
+      "rationale": "Local metadata advisory gap addressed on 2026-11-03 through Homebrew core EPICS Base receipts, with primary-reviewed ranges/baselines and discovery, fixed/unknown and hostile-input regressions. Findings remain advisory only. Running control systems, embedded consumers and network isolation are outside the scan.",
+      "evidence": [
+        "server/feed_advisories.py",
+        "server/inventory_metadata.py",
+        "server/software_inventory.py",
+        "tests/test_feed_advisories_extended.py",
+        "research/security-feed-next-dozen-coverage.md",
+        "https://www.cisa.gov/news-events/ics-advisories/icsa-26-300-01"
+      ]
+    },
+    {
+      "id": "pwn:https://pwn.watch/i/fortinet-ai-found-flaws-hardening-release-oct-2026",
+      "fingerprint": "7bf9a18b7408324582b6cbedf57b4c5ef01404a1a4da7fc3999235982dd0bf8f",
+      "status": "out_of_scope",
+      "rationale": "Reviewed 2026-11-03; scope correction, not protection: Fortinet appliance/service fleet hardening; FortiClient metadata cannot prove their patch state. Asset owner must verify product-specific deployment updates.",
+      "evidence": [
+        "research/security-feed-remaining-coverage.md",
+        "docs/software-exposure.md",
+        "https://www.fortinet.com/blog/ciso-collective/fortinet-releases-security-hardening-release-for-multiple-products"
+      ]
+    },
+    {
+      "id": "pwn:https://pwn.watch/i/fortinet-fortisandbox-cve-2026-107656",
+      "fingerprint": "474239ef10c59e987674e8833cd1e9ccb5c9922f5d4ac2a7b63af9b959606862",
+      "status": "out_of_scope",
+      "rationale": "Reviewed 2026-11-03; scope correction, not protection: FortiSandbox appliance/PaaS GUI; no supported macOS product metadata identifies this service. Asset owner must verify branch and patch. Vendor PSIRT was blocked; vendor CNA record verified product scope.",
+      "evidence": [
+        "research/security-feed-remaining-coverage.md",
+        "docs/software-exposure.md",
+        "https://raw.githubusercontent.com/CVEProject/cvelistV5/main/cves/2026/107xxx/CVE-2026-107656.json"
+      ]
+    },
+    {
+      "id": "pwn:https://pwn.watch/i/freeswitch-api-chat-rce-cve-2026-116779",
+      "fingerprint": "a3506f9a466d9c0222b9e2185db6b18963d673caeecff6c18ae97e63d394996f",
+      "status": "partial",
+      "rationale": "Local installation advisory gap addressed on 2026-11-03 via Homebrew core FreeSWITCH receipts, with primary-reviewed version checks and discovery/update/unknown/benign regressions. Findings are advisory only; no exploit prevention is asserted. The reviewed SIP MESSAGE advisory is assessed, not every module/configuration issue in the feed. Verify restart, chat settings and prior compromise.",
+      "evidence": [
+        "server/feed_advisories.py",
+        "server/software_inventory.py",
+        "tests/test_feed_advisories.py",
+        "research/security-feed-dozen-coverage.md",
+        "https://github.com/signalwire/freeswitch/security/advisories/GHSA-mg63-h38w-8p9p"
+      ]
+    },
+    {
+      "id": "pwn:https://pwn.watch/i/gitlab-cve-2026-110264-regex-rce",
+      "fingerprint": "4ef7a81c499ed1f3540a9e415a58f74976850c988b16d0c81c8189f1f782dd08",
+      "status": "partial",
+      "rationale": "Local metadata advisory gap addressed on 2026-11-03 through GitLab Rails VERSION files in explicitly scanned deployment trees, with primary-reviewed ranges/baselines and discovery, fixed/unknown and hostile-input regressions. Findings remain advisory only. This does not discover remote or running GitLab. A separately built Ruby runtime needs independent verification and remediation.",
+      "evidence": [
+        "server/feed_advisories.py",
+        "server/inventory_metadata.py",
+        "server/software_inventory.py",
+        "tests/test_feed_advisories_extended.py",
+        "research/security-feed-next-dozen-coverage.md",
+        "https://docs.gitlab.com/releases/patches/patch-release-gitlab-19-5-1-released/"
+      ]
+    },
+    {
+      "id": "pwn:https://pwn.watch/i/goahead-6-1-1-tls-auth-cgi-flaws-oct-2026",
+      "fingerprint": "98dd215cb4b93a1fc1527ec43504661cccaa2a70f34a46d68c24e878c055ae1a",
+      "status": "partial",
+      "rationale": "Reviewed 2026-11-03: Vendor source metadata identity and 6.1.1 update baseline are implemented. Source declarations never prove installed firmware or a running server fixed.",
+      "evidence": [
+        "server/remaining_advisories.py",
+        "server/deployment_metadata.py",
+        "server/software_inventory.py",
+        "tests/test_feed_advisories_remaining.py",
+        "research/security-feed-remaining-coverage.md",
+        "https://github.com/embedthis/goahead/releases/tag/v6.1.1"
+      ]
+    },
+    {
+      "id": "pwn:https://pwn.watch/i/isc-bind-cve-2026-94300",
+      "fingerprint": "b4cfb3f17842f205e81f270500af9a501a0b9a7f3f0a293c787ce24219acc2b8",
+      "status": "partial",
+      "rationale": "Local installation advisory gap addressed on 2026-11-03 via Homebrew core BIND receipts, with primary-reviewed version checks and discovery/update/unknown/benign regressions. Findings are advisory only; no exploit prevention is asserted. GSS-TSIG configuration and a running named service are not verified; 9.18 has no encoded fix and vendor/SPE builds remain unresolved.",
+      "evidence": [
+        "server/feed_advisories.py",
+        "server/software_inventory.py",
+        "tests/test_feed_advisories.py",
+        "research/security-feed-dozen-coverage.md",
+        "https://kb.isc.org/docs/cve-2026-94300"
+      ]
+    },
+    {
+      "id": "pwn:https://pwn.watch/i/ivanti-connect-secure-cve-2026-104935",
+      "fingerprint": "3620d4bce5427e3f34c027b6761259f2277b05e5c70dd3aae7e6889bdbfbaa02",
+      "status": "out_of_scope",
+      "rationale": "Reviewed 2026-11-03; scope correction, not protection: Connect Secure gateway chain, not the endpoint VPN client. Asset owner must verify every chained fix and incident response. Vendor advisory was blocked; vendor CNA record verified product scope.",
+      "evidence": [
+        "research/security-feed-remaining-coverage.md",
+        "docs/software-exposure.md",
+        "https://raw.githubusercontent.com/CVEProject/cvelistV5/main/cves/2026/104xxx/CVE-2026-104935.json"
+      ]
+    },
+    {
+      "id": "pwn:https://pwn.watch/i/jackson-databind-ptv-bypass-cve-2026-110879",
+      "fingerprint": "9631daf225d4bda2b1feb57c9c9dc4b3e3b4ad778860c8a9d39d642229d8ece8",
+      "status": "partial",
+      "rationale": "Local metadata advisory gap addressed on 2026-11-03 through bounded Maven properties in Jackson 2/3 JAR files, with primary-reviewed ranges/baselines and discovery, fixed/unknown and hostile-input regressions. Findings remain advisory only. Shaded/nested/renamed JARs, polymorphism settings, classpaths and running JVMs remain unverified.",
+      "evidence": [
+        "server/feed_advisories.py",
+        "server/inventory_metadata.py",
+        "server/software_inventory.py",
+        "tests/test_feed_advisories_extended.py",
+        "research/security-feed-next-dozen-coverage.md",
+        "https://github.com/FasterXML/jackson-databind/security/advisories/GHSA-m8xf-2cr7-77ph"
+      ]
+    },
+    {
+      "id": "pwn:https://pwn.watch/i/jenkins-core-security-advisory-2026-10-28",
+      "fingerprint": "62842c846dc5bfe78c5292792e0c35fce0b13ecb3ba528c3b21db831c46f4117",
+      "status": "partial",
+      "rationale": "Local installation advisory gap addressed on 2026-11-03 via separate Homebrew core Jenkins weekly/LTS receipts, with primary-reviewed version checks and discovery/update/unknown/benign regressions. Findings are advisory only; no exploit prevention is asserted. WAR/plugin installs, controller permissions, setup state and running/remote controllers are not inventoried.",
+      "evidence": [
+        "server/feed_advisories.py",
+        "server/software_inventory.py",
+        "tests/test_feed_advisories.py",
+        "research/security-feed-dozen-coverage.md",
+        "https://www.jenkins.io/security/advisory/2026-10-28/"
+      ]
+    },
+    {
+      "id": "pwn:https://pwn.watch/i/keycloak-cve-2026-18963-reset-credentials-takeover",
+      "fingerprint": "43a11c7a781b7890eb2670c2af1883ac970a78bc2e5bee6c5b62294d041881f4",
+      "status": "partial",
+      "rationale": "Local metadata advisory gap addressed on 2026-11-03 through bounded Maven properties in keycloak-services JAR files, with primary-reviewed ranges/baselines and discovery, fixed/unknown and hostile-input regressions. Findings remain advisory only. Reset-flow configuration, vendor backports, shaded/nested/renamed artifacts and running/remote controllers remain unverified.",
+      "evidence": [
+        "server/feed_advisories.py",
+        "server/inventory_metadata.py",
+        "server/software_inventory.py",
+        "tests/test_feed_advisories_extended.py",
+        "research/security-feed-next-dozen-coverage.md",
+        "https://github.com/advisories/GHSA-4gv3-mc9p-5wqc"
+      ]
+    },
+    {
+      "id": "pwn:https://pwn.watch/i/kubeflow-pipelines-volume-artifact-path-traversal-cve-2026-118758",
+      "fingerprint": "eff4ed6b33648851cc10976cec8b07d696a7fe3d2a000cbe24308cdcd8c1c8f8",
+      "status": "partial",
+      "rationale": "Reviewed 2026-11-03: Exact frontend image references in bounded local Compose/Kubernetes declarations now surface the volume-artifact advisory. Running frontend/artifact services and companion CVEs remain unverified.",
+      "evidence": [
+        "server/remaining_advisories.py",
+        "server/deployment_metadata.py",
+        "server/software_inventory.py",
+        "tests/test_feed_advisories_remaining.py",
+        "research/security-feed-remaining-coverage.md",
+        "https://github.com/kubeflow/pipelines/security/advisories/GHSA-2fg9-fx2f-439r"
+      ]
+    },
+    {
+      "id": "pwn:https://pwn.watch/i/labstack-echo-proxy-websocket-auth-bypass-ghsa-cxf3-9h37-7rr8",
+      "fingerprint": "12bd0e237cd41d354778171030dd40d2f7eff673a2a45e9c07cb54e23cf818bb",
+      "status": "partial",
+      "rationale": "Reviewed 2026-11-03: Exact Echo v4/v5 go.mod requirements now surface branch-specific advisories. Replacements/exclusions are unresolved; workspaces, selected transitive modules and compiled binaries are not resolved.",
+      "evidence": [
+        "server/remaining_advisories.py",
+        "server/deployment_metadata.py",
+        "server/software_inventory.py",
+        "tests/test_feed_advisories_remaining.py",
+        "research/security-feed-remaining-coverage.md",
+        "https://github.com/labstack/echo/security/advisories/GHSA-cxf3-9h37-7rr8"
+      ]
+    },
+    {
+      "id": "pwn:https://pwn.watch/i/langflow-oss-multiple-rce-cve-2026-110186-oct-2026",
+      "fingerprint": "7d71df97e1d74481b0378a600bdcec0a2e5c3f987a439fbad70fe49001ee32e0",
+      "status": "partial",
+      "rationale": "Local installation advisory gap addressed on 2026-11-03 via Python langflow metadata, with primary-reviewed version checks and discovery/update/unknown/benign regressions. Findings are advisory only; no exploit prevention is asserted. MCP/authentication configuration and running or remote services remain unverified.",
+      "evidence": [
+        "server/feed_advisories.py",
+        "server/software_inventory.py",
+        "tests/test_feed_advisories.py",
+        "research/security-feed-dozen-coverage.md",
+        "https://www.ibm.com/support/pages/node/7294467"
+      ]
+    },
+    {
+      "id": "pwn:https://pwn.watch/i/laravel-tokenguard-auth-bypass-cve-2026-114509",
+      "fingerprint": "afb8d369c1eee578a70745a722a0a234fb9fd770a69e51fa43257f0e56568bda",
+      "status": "partial",
+      "rationale": "Local installation advisory gap addressed on 2026-11-03 via Composer vendor/composer/installed.json, with primary-reviewed version checks and discovery/update/unknown/benign regressions. Findings are advisory only; no exploit prevention is asserted. TokenGuard/database settings, custom vendor directories and deployed/running workers are not verified.",
+      "evidence": [
+        "server/feed_advisories.py",
+        "server/software_inventory.py",
+        "tests/test_feed_advisories.py",
+        "research/security-feed-dozen-coverage.md",
+        "https://github.com/laravel/framework/security/advisories/GHSA-f9x3-7vq9-cph6"
+      ]
+    },
+    {
+      "id": "pwn:https://pwn.watch/i/linux-kernel-infinity-core-lpes-cve-2026-98260",
+      "fingerprint": "535186f678f12f91cef20dd320afebc8b0be21a89f572fb6de226e3c14f7b701",
+      "status": "out_of_scope",
+      "rationale": "The described Linux kernel issue is outside this macOS endpoint product. No remote/container-host kernel inventory, reboot verification or kernel exploit prevention exists; operators must assess their Linux hosts separately.",
+      "evidence": [
+        "server/software_inventory.py",
+        "server/exposure_advisories.py",
+        "https://pwn.watch/i/linux-kernel-infinity-core-lpes-cve-2026-98260"
+      ]
+    },
+    {
+      "id": "pwn:https://pwn.watch/i/linux-kernel-ipv4-tcp-uaf-cve-2026-98432",
+      "fingerprint": "176fb79ea8e3ce06db842464d563c6054f2cc4453d5162290319a894b9c180ae",
+      "status": "out_of_scope",
+      "rationale": "The described Linux kernel issue is outside this macOS endpoint product. No remote/container-host kernel inventory, reboot verification or kernel exploit prevention exists; operators must assess their Linux hosts separately.",
+      "evidence": [
+        "server/software_inventory.py",
+        "server/exposure_advisories.py",
+        "https://aws.amazon.com/security/security-bulletins/2026-160-aws/"
+      ]
+    },
+    {
+      "id": "pwn:https://pwn.watch/i/lm-studio-model-downloader-path-traversal-cve-2026-119979",
+      "fingerprint": "a6dd5a50cf4fd8908fb4c89f19417df703739c007891330ac94777822d09903b",
+      "status": "partial",
+      "rationale": "Local metadata advisory gap addressed on 2026-11-03 through the LM Studio app bundle identifier and version, with primary-reviewed ranges/baselines and discovery, fixed/unknown and hostile-input regressions. Findings remain advisory only. Bare 0.4.22 stays unresolved because its build is unknown. No model download containment or removal of previously installed persistence is claimed.",
+      "evidence": [
+        "server/feed_advisories.py",
+        "server/inventory_metadata.py",
+        "server/software_inventory.py",
+        "tests/test_feed_advisories_extended.py",
+        "research/security-feed-next-dozen-coverage.md",
+        "https://www.vulncheck.com/advisories/lm-studio-before-0.4.22-1-path-traversal-via-model-downloader"
+      ]
+    },
+    {
+      "id": "pwn:https://pwn.watch/i/lmdeploy-update-weights-pickle-rce-cve-2026-119706",
+      "fingerprint": "5e236d7e740afecef032b3f7e5fb8b947a37073683d59b495d0c5c94454a5c45",
+      "status": "partial",
+      "rationale": "Local installation advisory gap addressed on 2026-11-03 via Python lmdeploy metadata, with primary-reviewed version checks and discovery/update/unknown/benign regressions. Findings are advisory only; no exploit prevention is asserted. No fixed release is verified; future versions remain unresolved and reachable servers must be isolated/reviewed.",
+      "evidence": [
+        "server/feed_advisories.py",
+        "server/software_inventory.py",
+        "tests/test_feed_advisories.py",
+        "research/security-feed-dozen-coverage.md",
+        "https://www.vulncheck.com/advisories/lmdeploy-0.9.0-through-0.18.0-unauthenticated-rce-via-update-weights-pickle-deserialization"
+      ]
+    },
+    {
+      "id": "pwn:https://pwn.watch/i/nextcloud-collabora-built-in-code-server-cve-2026-110447",
+      "fingerprint": "579384b3befa7a806081b3aa3d4cc5a1a6ed4d2bf8413c002e24e51e97806de5",
+      "status": "partial",
+      "rationale": "Local metadata advisory gap addressed on 2026-11-03 through Nextcloud appinfo/info.xml identifying richdocumentscode, with primary-reviewed ranges/baselines and discovery, fixed/unknown and hostile-input regressions. Findings remain advisory only. This assesses local source/deployment metadata only; the Linux-only runtime, containers and remote servers are not scanned. Disabling the app alone is not remediation.",
+      "evidence": [
+        "server/feed_advisories.py",
+        "server/inventory_metadata.py",
+        "server/software_inventory.py",
+        "tests/test_feed_advisories_extended.py",
+        "research/security-feed-next-dozen-coverage.md",
+        "https://www.cve.org/CVERecord?id=CVE-2026-110447"
+      ]
+    },
+    {
+      "id": "pwn:https://pwn.watch/i/nextjs-october-2026-rce-security-release",
+      "fingerprint": "85f892d9d6481cb5028f247cfa29ebc0ac341acaf35b7e6f072e2e668ed7d899",
+      "status": "partial",
+      "rationale": "Local installation advisory gap addressed on 2026-11-03 via npm next metadata, with primary-reviewed version checks and discovery/update/unknown/benign regressions. Findings are advisory only; no exploit prevention is asserted. Feature flags, resolved sharp, deployed/running applications and the Linux-only SVG exploit remain unverified.",
+      "evidence": [
+        "server/feed_advisories.py",
+        "server/software_inventory.py",
+        "tests/test_feed_advisories.py",
+        "research/security-feed-dozen-coverage.md",
+        "https://nextjs.org/blog/nextjs-security-update-october-14-2026"
+      ]
+    },
+    {
+      "id": "pwn:https://pwn.watch/i/nodejs-october-2026-security-releases",
+      "fingerprint": "b109acbba0c41329c8f189d5c21b52d35547bca224112a0e1bd2e074451ca881",
+      "status": "partial",
+      "rationale": "Node branch baselines and standalone Brotli advice exist. Inventory cannot locate every embedded decoder, HTTP/2 dependency or server-side fetch path; verify each vendor fix and restart/rebuild consumers.",
+      "evidence": [
+        "server/software_inventory.py",
+        "server/exposure_advisories.py",
+        "tests/test_software_inventory.py",
+        "https://nodejs.org/en/blog/vulnerability/october-2026-security-releases"
+      ]
+    },
+    {
+      "id": "pwn:https://pwn.watch/i/okta-access-gateway-cve-2026-115547-115546",
+      "fingerprint": "c48a7dc97b54cfe612ca1f7f4fc33b5d018666dfe4ca4634d22e3ed161a0fe0c",
+      "status": "out_of_scope",
+      "rationale": "Reviewed 2026-11-03; scope correction, not protection: Access Gateway appliance Admin Console, not a Mac/browser client. Asset owner must verify gateway and bundled-runtime updates.",
+      "evidence": [
+        "research/security-feed-remaining-coverage.md",
+        "docs/software-exposure.md",
+        "https://trust.okta.com/security-advisories/command-execution-via-admin-console-input-in-okta-access-gateway-cve-2026-115547"
+      ]
+    },
+    {
+      "id": "pwn:https://pwn.watch/i/opencode-mcp-oauth-rce-windows",
+      "fingerprint": "85e1bd3838276d4efd2f9818e9dc9c5eaae4b965328b02fca6da8c6e01004681",
+      "status": "out_of_scope",
+      "rationale": "The feed describes Windows/WSL PowerShell injection, outside this macOS product. Shared MCP trust remains a broader gap; Allay has no universal MCP gateway. Verify platform applicability before creating any Mac rule.",
+      "evidence": [
+        "server/software_inventory.py",
+        "server/exposure_advisories.py",
+        "https://github.com/modelcontextprotocol/inspector/security/advisories/GHSA-q978-78c7-phqw"
+      ]
+    },
+    {
+      "id": "pwn:https://pwn.watch/i/pgadmin-4-9-19-import-export-rce-login-bypass-cve-2026-116241",
+      "fingerprint": "9b90a85cec8c0d484303e00eae502dfd4e634a12b82374aa94cb7be908bb8ef7",
+      "status": "partial",
+      "rationale": "Local installation advisory gap addressed on 2026-11-03 via Python pgadmin4 metadata, with primary-reviewed version checks and discovery/update/unknown/benign regressions. Findings are advisory only; no exploit prevention is asserted. Packaged desktop apps, server-mode migration, permissions and running processes still need independent verification.",
+      "evidence": [
+        "server/feed_advisories.py",
+        "server/software_inventory.py",
+        "tests/test_feed_advisories.py",
+        "research/security-feed-dozen-coverage.md",
+        "https://www.pgadmin.org/docs/pgadmin4/9.19/release_notes_9_19.html"
+      ]
+    },
+    {
+      "id": "pwn:https://pwn.watch/i/php2shell-cve-2026-109618-109619",
+      "fingerprint": "8bd265811bd91a104b4ab852cb33be2c26700edf41678dadb0bedd38c55bdfbf",
+      "status": "partial",
+      "rationale": "PHP branch baselines plus a separate session-upload configuration review exist. Allay cannot determine live web-server settings, verify remote hosts or replace PHP patching/WAF controls.",
+      "evidence": [
+        "server/software_inventory.py",
+        "server/exposure_advisories.py",
+        "tests/test_software_inventory.py",
+        "https://www.php.net/archive/2026.php"
+      ]
+    },
+    {
+      "id": "pwn:https://pwn.watch/i/pillow-fpx-heap-overflow-cve-2026-112398",
+      "fingerprint": "6cdf49b0c76d18c8f3e0cc74e8fb7e8ddab8d827fc90ab5062a504aa8fcd8fa8",
+      "status": "partial",
+      "rationale": "Pillow FPX version checks exist for discovered Python metadata. Optional olefile, live image-processing exposure and embedded environments remain unverified; this is advisory only.",
+      "evidence": [
+        "server/software_inventory.py",
+        "server/exposure_advisories.py",
+        "tests/test_software_inventory.py",
+        "https://github.com/python-pillow/Pillow/security/advisories/GHSA-5x8w-8jj5-q52h"
+      ]
+    },
+    {
+      "id": "pwn:https://pwn.watch/i/postiz-account-takeover-file-read-cve-2026-115933",
+      "fingerprint": "9f685bd45b595fbabbab603dafcabb7ea0c44e46513027147fbcc4977c3f1af1",
+      "status": "partial",
+      "rationale": "Reviewed 2026-11-03: Exact vendor image declarations now surface the 2.25.3 update baseline. The misleading root package version is excluded; runtime, mutable tags, credentials and prior compromise remain unverified.",
+      "evidence": [
+        "server/remaining_advisories.py",
+        "server/deployment_metadata.py",
+        "server/software_inventory.py",
+        "tests/test_feed_advisories_remaining.py",
+        "research/security-feed-remaining-coverage.md",
+        "https://github.com/gitroomhq/postiz-app/releases/tag/v2.25.3"
+      ]
+    },
+    {
+      "id": "pwn:https://pwn.watch/i/rancher-fleet-oct-2026-security-release-cluster-admin-escalation",
+      "fingerprint": "6a6f55629e1479f8f7fed9a9ed4e2e780a8ce52ca0367577c15219940c1b27f7",
+      "status": "partial",
+      "rationale": "Reviewed 2026-11-03: Separate Rancher/Fleet image declarations now surface reviewed branch update baselines. Desired tags do not verify deployed controllers, agent versions or management-cluster state.",
+      "evidence": [
+        "server/remaining_advisories.py",
+        "server/deployment_metadata.py",
+        "server/software_inventory.py",
+        "tests/test_feed_advisories_remaining.py",
+        "research/security-feed-remaining-coverage.md"
+      ]
+    },
+    {
+      "id": "pwn:https://pwn.watch/i/ruby-regexp-compilation-fixes-gitlab-cves",
+      "fingerprint": "ad95b1d4f6004e7f7ae158d674eb2d5a097ee473e155a47b2853eef8878e93e9",
+      "status": "partial",
+      "rationale": "Ruby compiler fix thresholds exist in software inventory. This is metadata advice, not GitLab deployment discovery or protection against regex compilation; verify vendor backports and running workers.",
+      "evidence": [
+        "server/software_inventory.py",
+        "server/exposure_advisories.py",
+        "tests/test_software_inventory.py",
+        "https://www.ruby-lang.org/en/news/2026/10/23/regexp-fixes-for-gitlab-cves/"
+      ]
+    },
+    {
+      "id": "pwn:https://pwn.watch/i/tailscale-tailworm-ssh-forwarding-privesc",
+      "fingerprint": "60d2a916151a3dbfd95087e9cee8a962eca5d8cc9c2266f25fbd1ef845918dd3",
+      "status": "partial",
+      "rationale": "Primary Tailscale and Headscale sources are now verified. Tested Tailscale app/core-formula and Headscale core-formula findings provide separate update baselines. SSH/Serve configuration, platform support, other Tailworm findings and remote nodes remain unverified. Update/restart each affected node and controller independently; no lateral-movement prevention is asserted.",
+      "evidence": [
+        "https://github.com/juanfont/headscale/releases/tag/v0.29.7",
+        "https://tailscale.com/security-bulletins",
+        "server/november_advisories.py",
+        "server/feed_advisories.py",
+        "server/software_inventory.py",
+        "tests/test_feed_advisories_november.py",
+        "research/security-feed-review-november.md"
+      ]
+    },
+    {
+      "id": "pwn:https://pwn.watch/i/teamviewer-15-83-security-update-oct-2026",
+      "fingerprint": "61f0490bb3f85c8e975d3dc2d30a2678fba9374ae167e25e5b4aea4536ee95a4",
+      "status": "partial",
+      "rationale": "TV-2026-1011 now supports tested macOS Full Client/Host update findings, including macOS legacy builds; Windows fixes are not treated as Mac fixes. TV-2026-1012 add-ons, loaded decoders and helper execution remain unverified. Update/relaunch clients and verify each Remote Management component separately; inventory does not prevent the helper race or malicious sessions.",
+      "evidence": [
+        "https://www.teamviewer.com/en/resources/trust-center/security-bulletins/tv-2026-1011/",
+        "server/november_advisories.py",
+        "server/feed_advisories.py",
+        "server/software_inventory.py",
+        "tests/test_feed_advisories_november.py",
+        "research/security-feed-review-november.md"
+      ]
+    },
+    {
+      "id": "pwn:https://pwn.watch/i/thales-sentinel-keys-server-unauth-rce-cve-2026-78403",
+      "fingerprint": "e0f7f0be5d5ce23a9f281ab4e1675e8bda284083c6ee3888d58db7a8caece875",
+      "status": "out_of_scope",
+      "rationale": "The feed describes a Windows SYSTEM service in Thales Sentinel Keys Server, a different product from this repository. Allay has no Windows service inventory or prevention; assess affected hosts with vendor guidance.",
+      "evidence": [
+        "server/software_inventory.py",
+        "server/exposure_advisories.py",
+        "https://pwn.watch/i/thales-sentinel-keys-server-unauth-rce-cve-2026-78403"
+      ]
+    },
+    {
+      "id": "pwn:https://pwn.watch/i/wasmtime-cranelift-sandbox-escapes-cve-2026-115889-115893",
+      "fingerprint": "9b4cce5dfd8ffb89614474bd4d6a5c99da773a4079cfd3df5e7dd7f9716c038b",
+      "status": "partial",
+      "rationale": "Separate SSA and ARM64 advisory ranges exist. Architecture is deliberately unknown without verified evidence; embedded engines and compiled modules need independent rebuild/restart verification.",
+      "evidence": [
+        "server/software_inventory.py",
+        "server/exposure_advisories.py",
+        "tests/test_software_inventory.py",
+        "https://github.com/bytecodealliance/wasmtime/security/advisories/GHSA-897f-g5gm-fmxm",
+        "https://github.com/bytecodealliance/wasmtime/security/advisories/GHSA-mghf-wjfp-p5xm"
+      ]
+    },
+    {
+      "id": "pwn:https://pwn.watch/i/wordpress-7-1-4-security-release-oct-2026",
+      "fingerprint": "cfe9571da990e0a1dc0f0b437bca17c6b4f9bc5e33dad806352e91512441b60b",
+      "status": "partial",
+      "rationale": "Local metadata advisory gap addressed on 2026-11-03 through literal WordPress wp-includes/version.php metadata, with primary-reviewed ranges/baselines and discovery, fixed/unknown and hostile-input regressions. Findings remain advisory only. The reviewed 7.1 branch has an October update baseline; older branch backports, live update windows, deployed files and remote sites remain unverified.",
+      "evidence": [
+        "server/feed_advisories.py",
+        "server/inventory_metadata.py",
+        "server/software_inventory.py",
+        "tests/test_feed_advisories_extended.py",
+        "research/security-feed-next-dozen-coverage.md",
+        "https://wordpress.org/news/2026/10/wordpress-7-1-4/"
+      ]
+    },
+    {
+      "id": "pwn:https://pwn.watch/i/zitadel-login-v2-account-takeover-cve-2026-119127-oct-2026",
+      "fingerprint": "37ab9f50e9723764f928dfe2bd2d9b9468823ba571eeef973603997ce0f541cc",
+      "status": "partial",
+      "rationale": "Reviewed 2026-11-03: Exact ZITADEL image declarations now surface Login V2/device authorization version findings. Separate login images, proxy headers, runtime rollout and prior account compromise remain unverified.",
+      "evidence": [
+        "server/remaining_advisories.py",
+        "server/deployment_metadata.py",
+        "server/software_inventory.py",
+        "tests/test_feed_advisories_remaining.py",
+        "research/security-feed-remaining-coverage.md",
+        "https://github.com/zitadel/zitadel/security/advisories/GHSA-qj3q-235g-qr6w"
+      ]
+    },
+    {
+      "id": "zero-wire:https://radar.cloudflare.com/security/zero-wire/citrix-netscaler-command-execution",
+      "fingerprint": "ab9abaffb8354b1d51d6229c95e0ac1e62d3b8218c7a03d73b82bcba4799eba7",
+      "status": "out_of_scope",
+      "rationale": "Reviewed 2026-11-03; scope correction, not protection: NetScaler ADC/Gateway incoming exploitation is outside the local Mac endpoint boundary. Workspace client versions and hostname rules cannot prove appliance protection. Asset owner must update and investigate.",
+      "evidence": [
+        "research/security-feed-remaining-coverage.md",
+        "docs/software-exposure.md",
+        "https://support.citrix.com/external/article/CTX697096"
+      ]
+    },
+    {
+      "id": "zero-wire:https://radar.cloudflare.com/security/zero-wire/emudhra-certificate-compromise",
+      "fingerprint": "316811c257dfbfb5f3e3a2b0e4a5fea12bec844881bce94b0a5e8a7f5f9862db",
+      "status": "partial",
+      "rationale": "Reviewed 2026-11-03: Local cloudflared core receipt and macOS WARP bundle checks add reviewed client-update baselines. This is a narrow update advisory, not certificate-chain/trust-store inspection, revocation or universal TLS interception protection.",
+      "evidence": [
+        "server/remaining_advisories.py",
+        "server/deployment_metadata.py",
+        "server/software_inventory.py",
+        "tests/test_feed_advisories_remaining.py",
+        "research/security-feed-remaining-coverage.md",
+        "https://blog.cloudflare.com/emudhra-certificate-compromise/"
+      ]
+    },
+    {
+      "id": "zero-wire:https://radar.cloudflare.com/security/zero-wire/linux-ipv4-tcp-use-after-free",
+      "fingerprint": "3f53a78fe87138982f5a1d690f14e1b544218da36d5b53ceb8c9ac2c421bd772",
+      "status": "out_of_scope",
+      "rationale": "Reviewed 2026-11-03; scope correction, not protection: Running Linux kernel vulnerability, including VM/container hosts. macOS metadata and Go package versions cannot establish vendor backports or active kernel fixes. Host owner must verify patch activation.",
+      "evidence": [
+        "research/security-feed-remaining-coverage.md",
+        "docs/software-exposure.md",
+        "https://access.redhat.com/security/vulnerabilities/RHSB-2026-016"
+      ]
+    },
+    {
+      "id": "zero-wire:https://radar.cloudflare.com/security/zero-wire/node2shell",
+      "fingerprint": "1131f3d14c166dd466bdce47855f2f2953e0ddc50cf3857d1d4973d41a63bdfd",
+      "status": "partial",
+      "rationale": "Node branch baselines and standalone Brotli advice exist. Inventory cannot locate every embedded decoder, HTTP/2 dependency or server-side fetch path; verify each vendor fix and restart/rebuild consumers.",
+      "evidence": [
+        "server/software_inventory.py",
+        "server/exposure_advisories.py",
+        "tests/test_software_inventory.py",
+        "https://nodejs.org/en/blog/vulnerability/october-2026-security-releases"
+      ]
+    },
+    {
+      "id": "zero-wire:https://radar.cloudflare.com/security/zero-wire/php2shell",
+      "fingerprint": "8a425694f99a80805dd9c7f5931a61e40170775151a2e1c4103220e50d87964d",
+      "status": "partial",
+      "rationale": "PHP branch baselines plus a separate session-upload configuration review exist. Allay cannot determine live web-server settings, verify remote hosts or replace PHP patching/WAF controls.",
+      "evidence": [
+        "server/software_inventory.py",
+        "server/exposure_advisories.py",
+        "tests/test_software_inventory.py",
+        "https://www.php.net/archive/2026.php"
+      ]
+    },
+    {
+      "id": "zero-wire:https://radar.cloudflare.com/security/zero-wire/wordpress-sql-injection-rce",
+      "fingerprint": "3a1de8c76869686efa372714f0683a6cba3b731d473fb67abe625dd92c108764",
+      "status": "partial",
+      "rationale": "Local metadata advisory gap addressed on 2026-11-03 through literal WordPress wp-includes/version.php metadata, with primary-reviewed ranges/baselines and discovery, fixed/unknown and hostile-input regressions. Findings remain advisory only. July and October findings remain separate. Feature prerequisites, deployed files, unreviewed branches and remote sites remain unverified.",
+      "evidence": [
+        "server/feed_advisories.py",
+        "server/inventory_metadata.py",
+        "server/software_inventory.py",
+        "tests/test_feed_advisories_extended.py",
+        "research/security-feed-next-dozen-coverage.md",
+        "https://wordpress.org/news/2026/07/wordpress-7-0-2-release/"
+      ]
+    },
+    {
+      "id": "pwn:https://pwn.watch/i/android-november-2026-security-bulletin-cve-2026-58868",
+      "fingerprint": "ceeae184c1335b044e3c9563861e6fe0bdedaaf4627e8163b3e13e5ff3137ee2",
+      "status": "out_of_scope",
+      "rationale": "Android Framework/System and vendor patch levels are outside the local macOS inventory and hook boundary. Device administrators must verify the installed Android security patch level against the bulletin; Allay cannot verify phone remediation.",
+      "evidence": [
+        "https://source.android.com/docs/security/bulletin/2026/2026-11-01",
+        "docs/software-exposure.md",
+        "research/security-feed-review-november.md"
+      ]
+    },
+    {
+      "id": "pwn:https://pwn.watch/i/apt29-watering-hole-ios-android-n-day-exploits-plerdy",
+      "fingerprint": "25d1bc1869dfab523750012c32e296e18e1fd1aefa71afb0cab46ed0f18d9290",
+      "status": "out_of_scope",
+      "rationale": "The researcher describes iOS and Android browser exploit chains. Allay does not inventory phones or inspect browser payloads; update affected mobile devices and investigate exposure through the mobile owner. No campaign or compromised-site hostname is added to blocking policy.",
+      "evidence": [
+        "https://www.sekoia.com/blog/poisoned-source-apt29-watering-holes-targets-mobile-devices-with-n-day-exploits",
+        "docs/outgoing-connections.md",
+        "research/security-feed-review-november.md"
+      ]
+    },
+    {
+      "id": "pwn:https://pwn.watch/i/barracuda-authorization-bypass-command-injection-cve-2026-116606",
+      "fingerprint": "e8101ed5ed97cc2ccba4db5aeb92ad57632d8f026771394f9347f984d8bf480d",
+      "status": "out_of_scope",
+      "rationale": "Barracuda appliance administration is outside the Mac endpoint boundary. Local clients and outbound hostname matches do not establish firmware protection; the appliance owner must apply product-specific patches, restrict administrative access and investigate compromise.",
+      "evidence": [
+        "https://documentation.campus.barracuda.com/wiki/spaces/CP/pages/960921759/Security+Updates+Available+for+Certain+Barracuda+Products",
+        "docs/software-exposure.md",
+        "research/security-feed-review-november.md"
+      ]
+    },
+    {
+      "id": "pwn:https://pwn.watch/i/better-auth-expo-account-takeover-cve-2026-121802",
+      "fingerprint": "7e8107dc044f9bda86bf88dc5461c8f848f20cf2daeb841cb1b821e5067ba663",
+      "status": "partial",
+      "rationale": "Installed npm @better-auth/expo and better-auth now have separate tested stable/beta version findings. Plugin registration, companion-version pairing, reachable endpoints and secret rotation remain unknown; update both packages, redeploy and rotate exposed application secrets. This is metadata advice, not account-takeover prevention.",
+      "evidence": [
+        "https://github.com/better-auth/better-auth/security/advisories/GHSA-4wq4-2ppv-q3hg",
+        "server/november_advisories.py",
+        "server/feed_advisories.py",
+        "server/software_inventory.py",
+        "tests/test_feed_advisories_november.py",
+        "research/security-feed-review-november.md"
+      ]
+    },
+    {
+      "id": "pwn:https://pwn.watch/i/chrome-157-security-update-nov-2026",
+      "fingerprint": "4f06bbad054a7c4ae715aa804db0079fa381a68197ed3cc477ad0a0af6bd0f49",
+      "status": "partial",
+      "rationale": "Chrome app metadata now reports the November stable update baseline separately from October, with old/fixed/unknown and unrelated-browser regressions. Relaunch and running-build verification remain manual; Chromium/Electron copies and browser exploitation are not mediated.",
+      "evidence": [
+        "https://chromereleases.googleblog.com/2026/11/stable-channel-update-for-desktop.html",
+        "server/exposure_advisories.py",
+        "server/software_inventory.py",
+        "tests/test_feed_advisories_november.py",
+        "research/security-feed-review-november.md"
+      ]
+    },
+    {
+      "id": "pwn:https://pwn.watch/i/cisco-ucs-central-authenticated-rce-cve-2026-76506",
+      "fingerprint": "063c31ce3ca7fb57783b3bd7f1ede8684b88cca6ee95241d76ce142ce5e6b8c4",
+      "status": "out_of_scope",
+      "rationale": "UCS Central web-management requests execute on the remote management appliance, outside Allay agent hooks and Mac inventory. The asset owner must verify the UCS Central update and authorized access; no Mac application version substitutes for that assessment.",
+      "evidence": [
+        "https://sec.cloudapps.cisco.com/security/center/content/CiscoSecurityAdvisory/cisco-sa-cucs-rce-LzHSFRDQ",
+        "server/host_agents.py",
+        "docs/software-exposure.md",
+        "research/security-feed-review-november.md"
+      ]
+    },
+    {
+      "id": "pwn:https://pwn.watch/i/debian-apt-http-resume-mitm-root-rce-cve-2026-109518",
+      "fingerprint": "33ff1d751139ae739e880b73361dfbaf17bbf49173c644fe0a04151482ea4c5c",
+      "status": "out_of_scope",
+      "rationale": "APT download verification and privileged package installation occur on Debian hosts or Linux guests. Allay does not inspect their package manager or mediate its post-verification file handling. Update APT through the distribution and verify the host package; Mac download reputation is not a fix.",
+      "evidence": [
+        "https://lists.debian.org/debian-security-announce/2026/msg00526.html",
+        "server/supply_chain.py",
+        "docs/software-exposure.md",
+        "research/security-feed-review-november.md"
+      ]
+    },
+    {
+      "id": "pwn:https://pwn.watch/i/docker-sandboxes-git-config-escape-cve-2026-121614",
+      "fingerprint": "dce243c93454565149f2de4abea68113c7fdd8e4463d571b80637c909a92c65d",
+      "status": "gap",
+      "rationale": "Docker confirms host Git execution from sandbox-controlled repository configuration, but Allay has no Sandboxes-specific offline version discovery or hook on Docker host-side Git. Add a bounded vendor-verified sbx metadata reader and affected/fixed/unknown fixtures, distinct from Docker Desktop versions. Upgrade Sandboxes and review writable mounts; ordinary Git commands and skill scanning do not establish prevention.",
+      "evidence": [
+        "https://github.com/docker/sbx-releases/releases/tag/v0.50.0",
+        "server/software_inventory.py",
+        "server/host_agents.py",
+        "server/skill_security.py",
+        "research/security-feed-review-november.md"
+      ]
+    },
+    {
+      "id": "pwn:https://pwn.watch/i/freerdp-3-32-2-memory-corruption-cert-bypass-cves",
+      "fingerprint": "74dae36d79ab39b4d4090f39af4a0fead09e8592f9fe64e2d9ad947ec669dfd7",
+      "status": "partial",
+      "rationale": "Homebrew core freerdp receipts now produce tested 3.x update findings for the 3.32.2 security baseline; custom/HEAD builds and other branches remain unresolved. Embedded libraries, enabled channels, peer trust and running sessions are not checked. Update/rebuild and restart consumers; no RDP traffic inspection is added.",
+      "evidence": [
+        "https://github.com/FreeRDP/FreeRDP/releases/tag/3.32.2",
+        "https://raw.githubusercontent.com/Homebrew/homebrew-core/master/Formula/f/freerdp.rb",
+        "server/november_advisories.py",
+        "server/feed_advisories.py",
+        "server/software_inventory.py",
+        "tests/test_feed_advisories_november.py",
+        "research/security-feed-review-november.md"
+      ]
+    },
+    {
+      "id": "pwn:https://pwn.watch/i/node-red-missing-authentication-cve-2026-58115",
+      "fingerprint": "feff191b3ba7f33515d3864a501632b8887f9983c640ba9e9821a020d70d5417",
+      "status": "partial",
+      "rationale": "Exact npm node-red metadata now triggers a tested configuration review at every version, including unknown versions. The Siemens Industrial OS fix is not an npm version cutoff. Allay does not evaluate settings.js, verify effective adminAuth/reachability or inspect running flows; the operator must secure the editor/admin API and review deployed flows.",
+      "evidence": [
+        "https://cert-portal.siemens.com/productcert/html/ssa-834709.html",
+        "https://nodered.org/docs/user-guide/runtime/securing-node-red",
+        "server/november_advisories.py",
+        "server/feed_advisories.py",
+        "server/software_inventory.py",
+        "tests/test_feed_advisories_november.py",
+        "research/security-feed-review-november.md"
+      ]
+    },
+    {
+      "id": "pwn:https://pwn.watch/i/nomachine-nxwebrunner-cve-2026-114549",
+      "fingerprint": "c218c3e81e41c87fce750a9192102e15cfcca89ca05163a93316e40e8445ab67",
+      "status": "gap",
+      "rationale": "NoMachine confirms an all-platform web-player issue, but the inventory has no verified Web Player component identity/version reader. Add bounded edition/component metadata discovery and branch-specific fixtures after verifying macOS packaging; do not infer nxwebrunner from an arbitrary NoMachine display name or a client cask. Restrict web-player access and apply the vendor fix independently.",
+      "evidence": [
+        "https://kb.nomachine.com/TR07X11893",
+        "server/software_inventory.py",
+        "server/inventory_metadata.py",
+        "research/security-feed-review-november.md"
+      ]
+    },
+    {
+      "id": "pwn:https://pwn.watch/i/puppet-openvox-server-rce-impersonation-cve-2026-115731",
+      "fingerprint": "32b40510efbc26c4f9e97424e446f6b54f0dc7bb30c5e79c3fc7dee1e5e72a53",
+      "status": "out_of_scope",
+      "rationale": "The vulnerable report deserialization and certificate-name authorization run on Puppet/OpenVox servers. A managed Mac agent can receive malicious actions from a compromised controller, but its local version cannot establish server remediation and Allay has no controller/CA integration. Server owners must update server components, verify authorization rules and investigate exposed CA keys and managed nodes.",
+      "evidence": [
+        "https://voxpupuli.org/blog/2026/11/03/critical-cve-updates/",
+        "server/software_inventory.py",
+        "server/host_agents.py",
+        "research/security-feed-review-november.md"
+      ]
+    },
+    {
+      "id": "pwn:https://pwn.watch/i/rails-active-storage-imagemagick-file-write-ghsa-f3w6-w445-fwh9",
+      "fingerprint": "c8cfe9f1fedbbee5d58f2caca66b38605a22feca16a74eda51a021ad9bccf701",
+      "status": "gap",
+      "rationale": "Ruby runtime inventory does not discover the activestorage gem or verify ImageMagick policy, MiniMagick environment overrides and Disk-service exposure. Add a bounded non-evaluating installed-gem metadata reader with four-component version tests and discovery fixtures; never execute gemspecs. Application owners must update Active Storage/MiniMagick, verify effective policy and rotate exposed secrets.",
+      "evidence": [
+        "https://github.com/rails/rails/security/advisories/GHSA-f3w6-w445-fwh9",
+        "server/software_inventory.py",
+        "server/exposure_advisories.py",
+        "research/security-feed-review-november.md"
+      ]
+    },
+    {
+      "id": "pwn:https://pwn.watch/i/seppmail-secure-email-gateway-cve-2026-114424",
+      "fingerprint": "5b3b05dfa7204cbbce5df7f0f9fc7a612da6ddb977437930286b85cb9d1a92ca",
+      "status": "out_of_scope",
+      "rationale": "The affected address rules and file-transfer workers run in a SEPPmail gateway appliance, not in a Mac mail client. Allay cannot inspect incoming gateway processing or active appliance rules. Gateway owners must update firmware, verify relevant features and investigate suspicious messages/files.",
+      "evidence": [
+        "https://docs.seppmail.com/en/20_revision-history.html",
+        "docs/software-exposure.md",
+        "docs/outgoing-connections.md",
+        "research/security-feed-review-november.md"
+      ]
+    },
+    {
+      "id": "pwn:https://pwn.watch/i/solarwinds-dameware-cve-2026-28336",
+      "fingerprint": "54fb389514fe32580e66c52ef2cf28a2ac77b82a948ac3c95c7dd52aab587d79",
+      "status": "unresolved",
+      "rationale": "The vendor confirms authenticated command injection affecting a remotely controlled host, but the reviewed advisory/CNA record does not establish which macOS targets or components, if any, are affected. Allay has no Dameware-specific inventory or remote-control mediation. Verify target-platform/component applicability with SolarWinds before adding Mac identities or ranges; update the Dameware control deployment per the vendor.",
+      "evidence": [
+        "https://www.solarwinds.com/trust-center/security-advisories/CVE-2026-28336",
+        "https://raw.githubusercontent.com/CVEProject/cvelistV5/main/cves/2026/28xxx/CVE-2026-28336.json",
+        "server/software_inventory.py",
+        "server/host_agents.py",
+        "research/security-feed-review-november.md"
+      ]
+    },
+    {
+      "id": "pwn:https://pwn.watch/i/sonicwall-gms-eol-unpatched-file-read-sqli-cve-2026-109593",
+      "fingerprint": "22e84acb19c04915304cc9816f5ea6f9c7e24f9b85f6f1b3e5cd8f9e5cb5b67d",
+      "status": "out_of_scope",
+      "rationale": "SonicWall CNA records identify GMS on Windows/Linux as affected and unsupported. Its management service and database are outside the Mac endpoint inventory. The PSIRT HTML was an empty shell; vendor-authored CNA records verify product/platform scope. The asset owner must isolate and replace the unsupported service and confirm migration guidance with SonicWall.",
+      "evidence": [
+        "https://psirt.global.sonicwall.com/vuln-detail/SNWLID-2026-0019",
+        "https://raw.githubusercontent.com/CVEProject/cvelistV5/main/cves/2026/109xxx/CVE-2026-109593.json",
+        "https://raw.githubusercontent.com/CVEProject/cvelistV5/main/cves/2026/109xxx/CVE-2026-109594.json",
+        "docs/software-exposure.md",
+        "research/security-feed-review-november.md"
+      ]
+    },
+    {
+      "id": "pwn:https://pwn.watch/i/watchguard-authpoint-gateway-auth-bypass-cve-2026-121637",
+      "fingerprint": "c3998729ba93136e6ee6a6c3770d71425389bbbd1261a089874ab04acce85bd1",
+      "status": "out_of_scope",
+      "rationale": "AuthPoint Authentication Gateway runs on Windows Server and is distinct from the macOS Logon app. Allay does not verify gateway LDAP/RADIUS callbacks, inter-service TLS or replay protection. The gateway owner must update the gateway and verify service activation; a Mac client update cannot establish remediation.",
+      "evidence": [
+        "https://psirt.watchguard.com/",
+        "https://www.watchguard.com/support/release-notes/cloud/Content/en-US/AuthPoint/EN_release-notes_authpoint.html",
+        "https://www.watchguard.com/help/docs/help-center/en-US/content/en-us/authpoint/gateways.html",
+        "docs/software-exposure.md",
+        "research/security-feed-review-november.md"
+      ]
+    },
+    {
+      "id": "pwn:https://pwn.watch/i/xen-xsa-523-grant-copy-guest-escape-cve-2026-102703",
+      "fingerprint": "6b288ccc0dacf2f8f71194449f771c496474f395a4e6a0e23ba4a05354da194c",
+      "status": "out_of_scope",
+      "rationale": "Xen grant-copy isolation is a hypervisor boundary, outside macOS inventory and agent hooks. Allay cannot patch or verify dom0 or other guests. Hypervisor owners must apply Xen/distribution fixes and verify host activation; VM image or application updates are insufficient.",
+      "evidence": [
+        "https://xenbits.xen.org/xsa/advisory-523.html",
+        "docs/software-exposure.md",
+        "research/security-feed-review-november.md"
+      ]
+    }
+  ]
+}

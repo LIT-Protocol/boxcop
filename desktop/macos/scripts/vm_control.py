@@ -48,11 +48,16 @@ async def control(args, port):
                     client.mouse.move(round(x1 + (x2-x1)*step/10), round(y1 + (y2-y1)*step/10))
                     await client.drain()
                     await asyncio.sleep(.05)
+        if args.scroll:
+            for _ in range(abs(args.scroll)):
+                (client.mouse.scroll_down if args.scroll > 0 else client.mouse.scroll_up)()
+                await client.drain()
+                await asyncio.sleep(.005)
         if args.key: client.keyboard.press(*args.key)
         if args.text: client.keyboard.write(args.text)
         if args.login_password: client.keyboard.write(settings['password'])
         await client.drain()
-        if args.click or args.move or args.drag or args.key or args.text or args.login_password:
+        if args.click or args.move or args.drag or args.scroll or args.key or args.text or args.login_password:
             await asyncio.sleep(.5)
             pixels=await client.screenshot()
         if args.screenshot:
@@ -67,6 +72,7 @@ def main():
     p.add_argument('--click',type=int,nargs=2,metavar=('X','Y'))
     p.add_argument('--move',type=int,nargs=2,metavar=('X','Y'),help='Hover without clicking')
     p.add_argument('--drag',type=int,nargs=4,metavar=('X1','Y1','X2','Y2'),help='Drag to arrange guest windows')
+    p.add_argument('--scroll',type=int,metavar='STEPS',help='Scroll at the pointer after --move; positive is down')
     p.add_argument('--key',nargs='+')
     p.add_argument('--text',help='Synthetic non-secret test text only')
     p.add_argument('--login-password',action='store_true',help='Type saved guest password into an already inspected authentication field')

@@ -307,7 +307,7 @@ def hook(harness, directory):
             explanation = ' '.join(record.decision.reasons)
             if 'human-review-required' not in record.decision.policy_ids:
                 explanation += ' ' + MESSAGE
-            explanation += ' Reference: ' + record.id
+                explanation += ' Reference: ' + record.id  # an approval hold already names its request
         receipt(directory, receipt_harness, 'observed', tool=tool, decision=record.decision.action,
                 record_id=record.id, session_id=event['session_id'],
                 elapsed_ms=round((time.monotonic() - started) * 1000, 3))

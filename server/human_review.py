@@ -132,7 +132,7 @@ def gate(directory, event, payload):
             if len(json.dumps(value).encode()) > 750000:
                 rows.pop()
                 return False, 'Approval inbox storage limit reached. Review pending requests in BoxCop.'
-        return False, 'BoxCop held this action for human review. Open Approvals in BoxCop. After approval, retry the exact action once. Do not use another tool to bypass review. Reference: ' + row['id']
+        return False, 'BoxCop held this action for human review. Open BoxCop to approve or reject it. After approval, retry the exact action once. Do not use another tool to bypass review. Reference: ' + row['id']
 
 
 def resolve(directory, identifier, approve, reviewer):

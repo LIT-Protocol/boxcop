@@ -354,9 +354,9 @@ def agent_checks(live_claude):
     record('agent_checks', 'malformed-input-is-not-allowed', garbage['out'].strip() not in ('', '{}'), reply=garbage['out'][:300])
     # A failed callback marks the integration for repair until a good one arrives; end on a good one.
     allowed, _, _ = hook('claude', 'printf harmless')
-    health = run([str(EXE), '--host-agent-integrations', 'status'], timeout=60)
+    health = subprocess.run([str(EXE), '--host-agent-integrations', 'status'], capture_output=True, text=True, timeout=60)
     try:
-        state = json.loads(health['out'])['harnesses']['claude']['state']
+        state = json.loads(health.stdout)['harnesses']['claude']['state']
     except (ValueError, KeyError):
         state = None
     record('agent_checks', 'health-recovers-after-good-callback', allowed and state not in (None, 'callback_error'), claude_state=state)

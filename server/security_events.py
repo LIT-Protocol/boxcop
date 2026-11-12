@@ -45,6 +45,18 @@ def _event(identifier, when, layer, outcome, title, reason, *, subject=None, age
             'package': package, 'host': host, 'policy_ids': list(policy_ids)}
 
 
+# What a denied command was about to do, most serious first.
+COMMAND_TITLES = {
+    'known-malicious-package': 'installing a known-malicious package',
+    'credential-file-egress': 'sending a credential file',
+    'command-sensitive-egress': 'sending sensitive data',
+    'remote-shell': 'running a downloaded script',
+    'credential-file-access': 'reading a credential file',
+    'download-then-exec': 'downloading and running a file',
+    'vulnerable-runtime': 'installing a vulnerable runtime',
+}
+
+
 def _command(text):
     """A short display form of a command that was already stored for review."""
     summary = redact(sanitize_metadata(text, truncate=False))
@@ -66,7 +78,8 @@ def hook_events(store, limit):
         action = event['action']
         path = event['destination'] if action != 'command' else None
         if action == 'command':
-            title = f'Blocked a command from {who}'
+            what = next((COMMAND_TITLES[policy] for policy in policies if policy in COMMAND_TITLES), None)
+            title = f'Blocked {who} from {what}' if what else f'Blocked a command from {who}'
         elif skill:
             title = f'Blocked {who} from loading unsafe agent instructions'
         else:
@@ -124,8 +137,13 @@ def firewall_events(directory, limit):
         reason = ('This is the BoxCop test package. It is always blocked so you can check that the install gate works.'
                   if row.get('self_test') else
                   'This release is listed as malicious' + (' by ' + ', '.join(sources) if sources else '') + '.')
-        events.append(_event(row['id'], when, 'install_gate', 'blocked',
-                             'Blocked install of ' + name + (' ' + version if version else ''), reason,
+        title = 'Blocked install of ' + name + (' ' + version if version else '')
+        if row.get('hidden') and version:
+            manager = 'pip' if row.get('ecosystem') == 'PyPI' else 'npm'
+            title = f'Hid malicious release {name} {version} from {manager}'
+            reason += (f' BoxCop removed it from the version list {manager} sees. A request for exactly this'
+                       f' version fails with a "no matching version" error from {manager}. Other versions still install.')
+        events.append(_event(row['id'], when, 'install_gate', 'blocked', title, reason,
                              subject=name + ('@' + version if version else ''), package=name,
                              policy_ids=['known-malicious-package']))
     return events

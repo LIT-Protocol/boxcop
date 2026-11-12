@@ -126,3 +126,34 @@ def test_update_outage_preserves_last_good_policy(firewall, monkeypatch):
     assert firewall.verdict('npm', 'fixture', '1.0.0')['decision'] == 'block'
     assert firewall.verdict('npm', 'fixture', '3.0.0')['decision'] == 'unknown'
     assert 'private' not in firewall.store.status()['update_error']
+
+
+def test_hidden_listed_release_is_recorded_once_and_explained(tmp_path):
+    """npm only says "no matching version" for a release left out of the list."""
+    from server.event_log import EventLog
+    from server.package_proxy import Firewall
+    from server.security_events import firewall_events
+
+    class Store:
+        class policy:
+            @staticmethod
+            def assess(ecosystem, name, candidate):
+                bad = candidate == '2.0.0'
+                return {'decision': 'block' if bad else 'unknown', 'reports': [{'source': 'datadog'}] if bad else []}
+
+    class Upstream:
+        def metadata(self, url):
+            versions = {v: {'name': 'mixed', 'version': v, 'dist': {'tarball': f'https://registry.npmjs.org/mixed/-/mixed-{v}.tgz'}}
+                        for v in ('1.0.0', '2.0.0')}
+            return {'name': 'mixed', 'versions': versions, 'dist-tags': {'latest': '2.0.0'}}
+
+    log = EventLog(tmp_path / 'blocks.json')
+    firewall = Firewall(Store(), b'k' * 32, upstream=Upstream(), log=log)
+    for _ in range(3):
+        document = firewall.npm('/npm/mixed', 'http://127.0.0.1:8794')
+    assert list(document['versions']) == ['1.0.0'] and document['dist-tags'] == {}
+    rows = log.read()
+    assert len(rows) == 1 and rows[0]['hidden'] and rows[0]['count'] == 1
+    event = firewall_events(tmp_path, 10)[0]
+    assert event['title'] == 'Hid malicious release mixed 2.0.0 from npm'
+    assert 'no matching version' in event['reason'] and event['outcome'] == 'blocked'

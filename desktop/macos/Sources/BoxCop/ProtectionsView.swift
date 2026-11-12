@@ -139,7 +139,7 @@ private struct OutboundDetails: View {
 
     var body: some View {
         VStack(alignment: .leading, spacing: 9) {
-            if !network.provisioningStatus.isEmpty { Text(network.provisioningStatus).font(.system(size: 12)).foregroundStyle(Palette.amber) }
+            if !network.provisioningStatus.isEmpty && !network.setupReady { Text(network.provisioningStatus).font(.system(size: 12)).foregroundStyle(Palette.amber) }
             if let snapshot = network.snapshot {
                 if let threat = snapshot.threatProtection {
                     HStack(spacing: 10) {

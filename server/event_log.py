@@ -51,8 +51,11 @@ class EventLog:
         except (OSError, ValueError, TypeError):
             return []
 
-    def append(self, entry, *, repeat_of=None):
+    def append(self, entry, *, repeat_of=None, quiet=False):
         """Add one entry. A repeat of the newest matching entry only raises its count.
+
+        A quiet entry that is already in the log is left where it is, so routine
+        repeats do not keep moving it to the top of the activity list.
 
         Logging is best-effort: a failure here must never change a block decision.
         """
@@ -62,7 +65,10 @@ class EventLog:
             try:
                 fcntl.flock(fd, fcntl.LOCK_EX)
                 rows = self.read()
-                previous = next((row for row in reversed(rows[-20:]) if repeat_of and row.get('key') == repeat_of), None)
+                recent = rows if quiet else rows[-20:]
+                previous = next((row for row in reversed(recent) if repeat_of and row.get('key') == repeat_of), None)
+                if previous and quiet:
+                    return
                 if previous:
                     previous['count'] = int(previous.get('count', 1)) + 1
                     previous['time'] = now()

@@ -192,7 +192,7 @@ def test_hook_decisions_are_reported_as_security_events_over_the_pipe(tmp_path):
         assert set(event) == {"id", "time", "layer", "outcome", "title", "reason", "subject", "agent", "command",
                               "package", "host", "policy_ids"}
         assert event["layer"] == "agent_actions" and event["outcome"] == "blocked" and event["agent"] == "claude"
-        assert event["title"] == "Blocked a command from Claude Code"
+        assert event["title"] == "Blocked Claude Code from sending sensitive data"
         assert "command-sensitive-egress" in event["policy_ids"]
         assert event["command"] is None  # The audit store keeps no command text.
         assert marker.encode() not in client.transcript

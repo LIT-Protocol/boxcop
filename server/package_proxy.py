@@ -83,6 +83,23 @@ class Firewall:
         # One install asks for the same release several times; record it once.
         self.log.append(entry, repeat_of='|'.join(str(entry[key]) for key in ('ecosystem', 'package', 'version')))
 
+    def hidden(self, verdicts):
+        """Record listed releases left out of a version list that still has safe ones.
+
+        The package manager then reports only that the version does not exist, so
+        the activity list is the one place that says why. Recorded once per release.
+        """
+        if self.log is None:
+            return
+        for verdict in list(verdicts)[:5]:
+            version = verdict.get('version')
+            if not isinstance(verdict.get('name'), str) or not isinstance(version, str):
+                continue
+            entry = dict(ecosystem=verdict.get('ecosystem'), package=verdict['name'][:214], version=version[:128],
+                         sources=sorted({str(row.get('source'))[:32] for row in verdict['reports']})[:8],
+                         self_test=False, hidden=True)
+            self.log.append(entry, repeat_of='|'.join(str(entry[key]) for key in ('ecosystem', 'package', 'version')), quiet=True)
+
     def link(self, base, ecosystem, name, candidate, url):
         name = package_name(ecosystem, name)
         version(ecosystem, candidate)
@@ -156,6 +173,7 @@ class Firewall:
             return clean[selected]
         if not clean and blocked:
             raise Blocked(dict(next(iter(blocked.values())), version=None))
+        self.hidden(blocked.values())
         return dict(metadata, versions=clean, **{'dist-tags': {tag: candidate for tag, candidate in tags.items() if candidate in clean}})
 
     def npm_artifact(self, path):
@@ -221,6 +239,7 @@ class Firewall:
             files.append(rewritten)
         if not files and blocked:
             raise Blocked(dict(blocked[0], version=None))
+        self.hidden({row['version']: row for row in blocked}.values())
         return {'meta': {'api-version': '1.0'}, 'name': name, 'files': files}
 
 

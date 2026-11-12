@@ -34,7 +34,7 @@ packaged release profile and channel, and the updater startup check.
   with `BOXCOP_APP_PROFILE` and `BOXCOP_NETWORK_PROFILE`.
 - **Notarization credentials** saved in the Keychain with
   `xcrun notarytool store-credentials`, by default under the profile name
-  `sentinel-beta`. Override with `BOXCOP_NOTARY_PROFILE`.
+  `sentinel-beta`, falling back to `allay-ci-local` (the lab Mac has used both names). Override with `BOXCOP_NOTARY_PROFILE`.
 
 The profile file names and the `~/.sentinel-lab` directory keep their original
 names. The profiles are bound to the bundle identifiers `local.sentinel.endpoint`

@@ -16,7 +16,7 @@ provisioning profiles, and saved notarytool credentials.
 
 Optional environment variables:
   BOXCOP_SIGNING_IDENTITY  Certificate SHA-1 (required if multiple identities exist)
-  BOXCOP_NOTARY_PROFILE    Saved Keychain profile (default: sentinel-beta)
+  BOXCOP_NOTARY_PROFILE    Saved Keychain profile (default: sentinel-beta, then allay-ci-local)
   BOXCOP_KEYCHAIN_PATH     Optional temporary CI keychain for notarization
   BOXCOP_PYTHON            Python 3.12 executable (default: python3.12)
   BOXCOP_VERSION           Optional display version (major.minor.patch; set by release CI)
@@ -79,11 +79,18 @@ network_profile="${BOXCOP_NETWORK_PROFILE:-$HOME/.sentinel-lab/profiles/Allay_Ne
 extension_version="${BOXCOP_EXTENSION_VERSION-$(date +%s)}"
 [[ "$extension_version" =~ ^[1-9][0-9]*$ ]] || fail 'BOXCOP_EXTENSION_VERSION must be an increasing positive integer.'
 protection_args=(--app-profile "$app_profile" --network-profile "$network_profile" --extension-version "$extension_version")
-profile="${BOXCOP_NOTARY_PROFILE:-sentinel-beta}"
-printf 'Checking notarization credentials for Keychain profile: %s\n' "$profile"
-notary_args=(history --keychain-profile "$profile" --output-format json)
-if [[ -n "${BOXCOP_KEYCHAIN_PATH:-}" ]]; then notary_args+=(--keychain "$BOXCOP_KEYCHAIN_PATH"); fi
-xcrun notarytool "${notary_args[@]}" >/dev/null || fail 'Notarization credentials unavailable. Configure the Keychain profile with xcrun notarytool store-credentials, then retry.'
+# The lab Mac has had its notary credentials saved under either of these names.
+notary_ok() {
+  local args=(history --keychain-profile "$1" --output-format json)
+  if [[ -n "${BOXCOP_KEYCHAIN_PATH:-}" ]]; then args+=(--keychain "$BOXCOP_KEYCHAIN_PATH"); fi
+  xcrun notarytool "${args[@]}" >/dev/null 2>&1
+}
+profile=''
+for candidate in ${BOXCOP_NOTARY_PROFILE:-sentinel-beta allay-ci-local}; do
+  printf 'Checking notarization credentials for Keychain profile: %s\n' "$candidate"
+  if notary_ok "$candidate"; then profile="$candidate"; break; fi
+done
+[[ -n "$profile" ]] || fail 'Notarization credentials unavailable. Save a Keychain profile with xcrun notarytool store-credentials and set BOXCOP_NOTARY_PROFILE to its name, then retry.'
 
 # Install gate: BoxCop has no malware feed of its own yet. It consumes the existing
 # signed Allay feed, so a local build blocks listed packages without extra setup.

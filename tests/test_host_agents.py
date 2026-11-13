@@ -188,6 +188,25 @@ def test_busy_audit_denies_before_vendor_timeout(layout):
     assert json.loads((data/'cursor-receipt.json').read_text())['state'] == 'error'
 
 
+def test_brief_audit_contention_allows_after_writer_finishes(layout):
+    from concurrent.futures import ThreadPoolExecutor
+    import sqlite3
+    import time
+    data = layout[1]
+    call('cursor', data, payload('cursor', 'printf harmless'))
+    with ThreadPoolExecutor(max_workers=1) as pool:
+        with sqlite3.connect(data/'events.sqlite3') as db:
+            db.execute('BEGIN IMMEDIATE')
+            pending = pool.submit(call, 'cursor', data, payload('cursor', 'printf harmless'))
+            # Simulate another callback holding the writer lock briefly. This is
+            # longer than the former 200 ms wait, but below the hook deadline.
+            time.sleep(.6)
+        result = pending.result()
+    assert result.returncode == 0 and json.loads(result.stdout)['permission'] == 'allow'
+    with sqlite3.connect(data/'events.sqlite3') as db:
+        assert db.execute('select count(*) from events').fetchone()[0] == 2
+
+
 def test_concurrent_callbacks_have_separate_audit_records(layout):
     from concurrent.futures import ThreadPoolExecutor
     import sqlite3

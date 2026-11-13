@@ -298,7 +298,8 @@ def hook(harness, directory):
         # Deterministic rules only: no model downloads, inference or network calls.
         # SQLite's normal 10s busy wait exceeds vendor hook deadlines. A busy or
         # unavailable audit must produce an explicit deny before the harness times out.
-        engine = Engine(_private_store(str(directory), timeout=.2), classifier=ContentClassifier())
+        # Allow brief writer contention between callbacks within the 3s deadline.
+        engine = Engine(_private_store(str(directory), timeout=1), classifier=ContentClassifier())
         record = engine.evaluate(EventInput(**event))
         allowed = record.decision.action == 'allow'
         if not allowed:

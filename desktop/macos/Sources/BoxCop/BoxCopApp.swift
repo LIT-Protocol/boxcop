@@ -40,7 +40,7 @@ import BoxCopCore
         if arguments.contains("--release-profile") { print(profile.rawValue); return }
         if first == "--status" { StatusCommand.run(arguments: arguments) }
         if let first, ["--host-agent-hook", "--host-agent-integrations"].contains(first) { HostAgents.run(Array(arguments.dropFirst())) }
-        else if arguments.contains("--dev-software-inventory") { SoftwareInventory.run() }
+        else if first == "--software-inventory" || first == "--dev-software-inventory" { SoftwareInventory.run() }
         else if arguments.contains("--dev-network-filter-enable") { NetworkFilterControl.run(enable: true) }
         else if arguments.contains("--dev-network-filter-disable") { NetworkFilterControl.run(enable: false) }
         else if let index = arguments.firstIndex(of: "--dev-interface-preview"), arguments.count > index + 1 {

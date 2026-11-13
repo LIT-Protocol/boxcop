@@ -363,6 +363,8 @@ def main(argv=None):
     p = argparse.ArgumentParser(description=__doc__)
     p.add_argument('--root',action='append',type=Path)
     p.add_argument('--cache',action='store_true',help='Save a private report in the existing BoxCop app data directory')
+    p.add_argument('--format', choices=('inventory', 'findings', 'agent'), default='inventory',
+                   help='Full inventory, actionable findings JSON, or a repair prompt')
     args = p.parse_args(argv)
     report = Scan().run(args.root)
     from .software_remediation import items, load_results
@@ -372,7 +374,12 @@ def main(argv=None):
         report['cache_status'] = 'saved'
         try: save_report(report,Path.home()/'Library/Application Support/BoxCop')
         except (OSError,ValueError): report['cache_status'] = 'unavailable'
-    print(json.dumps(report, separators=(',',':')))
+    if args.format == 'inventory':
+        print(json.dumps(report, separators=(',',':')))
+    else:
+        from .software_findings import findings_report, agent_prompt
+        evidence = findings_report(report)
+        print(agent_prompt(evidence) if args.format == 'agent' else json.dumps(evidence, separators=(',', ':')))
     return 0
 
 if __name__ == '__main__': raise SystemExit(main())

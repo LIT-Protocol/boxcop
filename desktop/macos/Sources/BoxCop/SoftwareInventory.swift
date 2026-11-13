@@ -75,8 +75,10 @@ enum SoftwareInventory {
     }
     static func run() {
         let args = Array(CommandLine.arguments.dropFirst(2))
-        guard args.isEmpty || (args.count == 2 && args[0] == "--root"),
-              let data = scan(roots: args.isEmpty ? [] : [args[1]]) else { print("Inventory unavailable"); exit(1) }
+        guard let data = EngineTools.run(["--software-inventory"] + args, timeout: 15) else {
+            fputs("Inventory unavailable or invalid arguments. Use --root PATH and --format inventory|findings|agent.\n", stderr)
+            exit(1)
+        }
         FileHandle.standardOutput.write(data)
     }
     static func refresh() async -> SoftwareInventoryReport? {

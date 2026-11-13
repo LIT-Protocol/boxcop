@@ -64,6 +64,11 @@ struct HealthView: View {
         let count = model.activeFindings.count
         PageScaffold(title: "Health", subtitle: subtitle(count)) {
             HStack(spacing: 10) {
+                Button(copied == "all" ? "Copied" : "Copy all steps for my agent") {
+                    copyInstructions(model.activeFixItems, copyID: "all")
+                }
+                .buttonStyle(.quiet).disabled(busy || model.activeFixItems.isEmpty)
+                .help("Copies active findings and repair guidance, including local paths. Review before sharing with an agent.")
                 if model.inventoryBusy { ProgressView().controlSize(.small) }
                 Button(model.inventoryBusy ? "Checking" : "Check now") { Task { await model.refreshInventory() } }
                     .buttonStyle(.quiet).disabled(busy || !model.capabilities.engine)
@@ -268,9 +273,13 @@ struct HealthView: View {
     }
 
     private func copyInstructions(_ group: FixGroup) {
+        copyInstructions(group.items, copyID: group.id)
+    }
+
+    private func copyInstructions(_ items: [SoftwareFixItem], copyID: String) {
         guard let report = model.inventory else { return }
-        let installations = group.items.map { item -> SoftwareAgentInstructions.Installation in
-            let advisories = report.records.filter { item.observationIds.contains($0.id) }.flatMap(\.advisories).filter(\.needsReview)
+        let installations = items.map { item -> SoftwareAgentInstructions.Installation in
+            let advisories = model.activeFindings.filter { item.observationIds.contains($0.id) }.flatMap(\.advisories).filter(\.needsReview)
             var seen = Set<String>()
             return SoftwareAgentInstructions.Installation(name: item.name, versions: item.versions, path: item.location,
                 advisories: advisories.filter { seen.insert($0.id + "|" + $0.state).inserted }.map {
@@ -280,7 +289,7 @@ struct HealthView: View {
         }
         guard let text = SoftwareAgentInstructions.make(installations: installations, scannedAt: report.generatedAt,
                                                        incomplete: report.incomplete, coverage: report.coverage) else { return }
-        Format.copy(text); copied = group.id
+        Format.copy(text); copied = copyID
     }
 }
 #endif

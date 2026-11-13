@@ -133,3 +133,20 @@ final class AppModelTests: XCTestCase {
         XCTAssertFalse(updater.enabled)
     }
 }
+
+extension AppModelTests {
+    @MainActor func testCredentialFailuresAppearOnOverview() throws {
+        let model = try Fixtures.model(.protected)
+        var status = CredentialProtectionStatus(state: "needsPermission", detail: "Full Disk Access required")
+        status.enabled = true
+        model.network.credentials = status
+        XCTAssertTrue(model.attentionNeeded)
+        XCTAssertTrue(model.needsYou.contains { $0.id == "credentials" })
+        status.state = "active"
+        model.network.credentials = status
+        XCTAssertFalse(model.needsYou.contains { $0.id == "credentials" })
+        status.state = "degraded"
+        model.network.credentials = status
+        XCTAssertTrue(model.needsYou.contains { $0.id == "credentials" })
+    }
+}

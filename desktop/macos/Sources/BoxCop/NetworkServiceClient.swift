@@ -9,7 +9,8 @@ enum NetworkServiceClient {
 
     static func allowed(_ command: String) -> Bool {
         guard command.utf8.count < 1024, !command.contains("\n") else { return false }
-        if ["network-activity", "network-activity-export", "network-threat-blocking-on", "network-threat-blocking-off"].contains(command) { return true }
+        if ["credential-protection-status", "credential-protection-on", "credential-protection-off", "network-activity", "network-activity-export", "network-threat-blocking-on", "network-threat-blocking-off"].contains(command) { return true }
+        if command.hasPrefix("credential-allow ") { return UUID(uuidString: String(command.dropFirst("credential-allow ".count))) != nil }
         guard command.hasPrefix("network-workflow ") else { return false }
         let cursor = String(command.dropFirst("network-workflow ".count))
         return cursor == "start" || UUID(uuidString: cursor) != nil

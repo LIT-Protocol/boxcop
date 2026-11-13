@@ -24,6 +24,7 @@ final class NetworkActivityService: @unchecked Sendable {
     private let startedAt = Date()
     private var socketFD: Int32 = -1, lockFD: Int32 = -1
     private var source: DispatchSourceRead?
+    private var credentials: CredentialProtection?
     init() throws {
         guard geteuid() == 0 else { throw CocoaError(.fileReadNoPermission) }
         for path in ["/Library", "/Library/Application Support"] {
@@ -97,6 +98,7 @@ final class NetworkActivityService: @unchecked Sendable {
         }
     }
     func start() throws {
+        credentials = CredentialProtection()
         socketFD = socket(AF_UNIX, SOCK_STREAM, 0)
         guard socketFD >= 0 else { throw CocoaError(.fileWriteUnknown) }
         _ = fcntl(socketFD, F_SETFL, O_NONBLOCK); _ = fcntl(socketFD, F_SETFD, FD_CLOEXEC)
@@ -127,6 +129,9 @@ final class NetworkActivityService: @unchecked Sendable {
         }
         guard bytes.last == 10 else { return }
         let command = String(decoding: bytes.dropLast(), as: UTF8.self)
+        if command == "credential-protection-on" || command == "credential-protection-off" || command.hasPrefix("credential-allow ") {
+            guard CredentialProtection.authorizedController(fd) else { return }
+        }
         let reply = handle(command)
         let output = Array((reply + "\n").utf8)
         output.withUnsafeBytes { data in
@@ -139,6 +144,14 @@ final class NetworkActivityService: @unchecked Sendable {
     }
     private func handle(_ command: String) -> String {
         let encoder = JSONEncoder()
+        if command.hasPrefix("credential-allow "), let id = UUID(uuidString: String(command.dropFirst("credential-allow ".count))) {
+            return credentials?.allowTemporarily(id) ?? "Unavailable"
+        }
+        if command == "credential-protection-on" { return credentials?.setEnabled(true) ?? "Unavailable" }
+        if command == "credential-protection-off" { return credentials?.setEnabled(false) ?? "Unavailable" }
+        if command == "credential-protection-status", let status = credentials?.status() {
+            return (try? String(decoding: encoder.encode(status), as: UTF8.self)) ?? "Unavailable"
+        }
         if command == "network-activity" {
             let statistics = writer.sync {
                 let count = summary.rows.count

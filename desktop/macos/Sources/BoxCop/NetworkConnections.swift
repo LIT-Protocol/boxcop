@@ -6,6 +6,8 @@ import UniformTypeIdentifiers
 
 /// Layer 3 state and actions: the system extension, the content filter, threat blocking and history.
 @MainActor final class NetworkConnectionsModel: ObservableObject {
+    @Published private(set) var credentialProtectionWanted = UserDefaults.standard.bool(forKey: "boxcop.credentials.wanted")
+    @Published var credentials: CredentialProtectionStatus?
     @Published var snapshot: NetworkActivitySnapshot?
     @Published var result = ""
     @Published var busy = false
@@ -42,6 +44,27 @@ import UniformTypeIdentifiers
             busy = false
         }
     }
+    func setCredentialProtection(_ enabled: Bool) {
+        guard !busy else { return }; busy = true
+        Task {
+            defer { busy = false }
+            if enabled && credentials == nil {
+                guard await provisioning.enableNetworkFilter() else { await refresh(); return }
+            }
+            result = await NetworkServiceClient.send(enabled ? "credential-protection-on" : "credential-protection-off") ?? "The extension did not answer. Finish system protection setup and retry."
+            await refresh()
+        }
+    }
+    func allowCredentialRead(_ id: UUID) {
+        guard !busy else { return }; busy = true
+        Task {
+            result = await NetworkServiceClient.send("credential-allow " + id.uuidString) ?? "The extension did not answer."
+            await refresh(); busy = false
+        }
+    }
+    func openFullDiskAccess() {
+        NSWorkspace.shared.open(URL(string: "x-apple.systempreferences:com.apple.preference.security?Privacy_AllFiles")!)
+    }
     func setThreatBlocking(_ enabled: Bool) {
         guard !busy else { return }; busy = true
         Task {
@@ -59,6 +82,12 @@ import UniformTypeIdentifiers
         guard !refreshing else { return }; refreshing = true
         defer { refreshing = false }
         if provisioning.available { extensionState = await inspection.inspect() }
+        let credentialReply = await NetworkServiceClient.send("credential-protection-status")
+        credentials = credentialReply?.data(using: .utf8).flatMap { try? JSONDecoder().decode(CredentialProtectionStatus.self, from: $0) }
+        if let credentials {
+            credentialProtectionWanted = credentials.enabled
+            UserDefaults.standard.set(credentials.enabled, forKey: "boxcop.credentials.wanted")
+        }
         let reply = await NetworkServiceClient.send("network-activity")
         snapshot = reply?.data(using: .utf8).flatMap { try? JSONDecoder().decode(NetworkActivitySnapshot.self, from: $0) }
         guard provisioning.available else { return }

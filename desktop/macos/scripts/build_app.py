@@ -343,7 +343,7 @@ def verify_limited_development_bundle(bundle):
         result = subprocess.run(["/usr/bin/codesign", "-d", "--entitlements", ":-", str(path)],
                                 capture_output=True, check=True)
         entitlements = plistlib.loads(result.stdout) if result.stdout.strip() else {}
-        # BoxCop never requests the Endpoint Security entitlement; refuse it if it ever appears.
+        # Limited development builds must never carry privileged entitlements.
         forbidden = {"com.apple.developer.endpoint-security.client", "com.apple.developer.networking.networkextension",
                      "com.apple.developer.system-extension.install", "com.apple.security.get-task-allow"}
         if any(entitlements.get(key) for key in forbidden):
@@ -521,7 +521,7 @@ def build(output, *, host_system=None, signing_identity="-", profile="distributi
         for target, expected in provisioned.items():
             result = subprocess.run(["/usr/bin/codesign", "-d", "--entitlements", ":-", str(target)], capture_output=True, check=True)
             actual = plistlib.loads(result.stdout)
-            if any(actual.get(key) != value for key, value in expected.items()) or actual.get("com.apple.developer.endpoint-security.client") or actual.get("com.apple.security.get-task-allow"):
+            if any(actual.get(key) != value for key, value in expected.items()) or actual.get("com.apple.developer.endpoint-security.client") != expected.get("com.apple.developer.endpoint-security.client") or actual.get("com.apple.security.get-task-allow"):
                 raise BuildError("Signed entitlements do not match the network-extension distribution contract")
     # Exercise the signed inference runtime without downloading/loading any weights.
     run([contents / "Resources/inference/llama-server", "--version"], cwd=work, env=env, timeout=30)

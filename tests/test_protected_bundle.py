@@ -24,10 +24,10 @@ def profile(kind):
 
 
 @pytest.mark.parametrize('kind', ['app', 'network'])
-def test_network_distribution_does_not_require_endpoint_security(kind):
+def test_combined_extension_requires_endpoint_security_only_on_extension(kind):
     data = profile(kind)
     assert module.validate_profile(data, kind, IDENTITY) == TEAM
-    assert 'com.apple.developer.endpoint-security.client' not in data['Entitlements']
+    assert data['Entitlements'].get('com.apple.developer.endpoint-security.client', False) == (kind == 'network')
 
 
 @pytest.mark.parametrize('mutation', ['expired', 'debug', 'wildcard', 'certificate', 'capability', 'distribution', 'team'])
@@ -99,3 +99,10 @@ def test_bundle_has_only_network_extension_and_matching_version(tmp_path):
 def test_extension_version_is_explicit_positive_integer(version, tmp_path):
     with pytest.raises(ValueError, match='version'):
         module.embed(tmp_path, tmp_path, tmp_path, {}, version)
+
+
+def test_old_network_profile_is_rejected_without_endpoint_security():
+    data = profile('network')
+    del data['Entitlements']['com.apple.developer.endpoint-security.client']
+    with pytest.raises(ValueError, match='endpoint-security'):
+        module.validate_profile(data, 'network', IDENTITY)

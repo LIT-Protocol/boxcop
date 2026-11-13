@@ -104,8 +104,12 @@ def firewall_events(directory, limit):
             reason = 'This is the BoxCop test package. It is always blocked so you can check that the install gate works.'
         elif reported:
             title += ' (reported as malware)'
-            reason = (f'This release is reported as malware{named}, but the report is not yet confirmed.'
-                      ' If you are sure it is safe, you can allow this exact version.')
+            if version:
+                reason = (f'This release is reported as malware{named}, but the report is not yet confirmed.'
+                          ' If you are sure it is safe, you can allow this exact version.')
+            else:
+                reason = (f'Every available version of this package is reported as malware{named}, but the reports'
+                          ' are not yet confirmed. To allow one, install an exact version and allow it from that event.')
         else:
             reason = f'This release is confirmed malware{named}. It cannot be allowed.'
         events.append(_event(row['id'], when, 'install_gate', 'blocked', title, reason,

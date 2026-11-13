@@ -72,7 +72,7 @@ Rules:
   error details.
 
 `package_protection` with `allow` adds an exception for one exact release that the
-feed reports as malware but has not confirmed; `revoke` removes it. Confirmed
+feed reports as malware but has not confirmed; `revoke` removes it. Both take `ecosystem` (`npm` or `PyPI`), `package` and `package_version`; the release version cannot be called `version` because every request already uses that key for the protocol version. Confirmed
 malware and the test package are refused. The firewall checks the tier again on
 every request, so an exception stops working if the feed later confirms the
 release. Every `package_protection` reply lists

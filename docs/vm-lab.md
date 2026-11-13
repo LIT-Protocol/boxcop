@@ -66,6 +66,7 @@ address recorded in `lab.json`.
 | `lab ssh [command]` | Opens a shell in the guest, or runs one command there, with the lab key and host verification. |
 | `lab screenshot <png>` | Saves a screenshot of the guest's screen. |
 | `lab click X Y` | Clicks at a point on the guest's screen. |
+| `lab control ARGS` | Passes any other `vm_control.py` argument through: `--text`, `--key Return`, `--scroll N`, `--move X Y`, `--login-password`. |
 
 ```sh
 ~/.sentinel-lab/lab status

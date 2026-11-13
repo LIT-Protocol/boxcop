@@ -169,7 +169,7 @@ struct EventDetail: View {
         }
         .alert("Allow \(confirming?.package ?? "") \(confirming?.version ?? "")?", isPresented: Binding(get: { confirming != nil }, set: { if !$0 { confirming = nil } }),
                presenting: confirming) { release in
-            Button("Cancel", role: .cancel) {}
+            Button("Cancel", role: .cancel) {}.keyboardShortcut(.defaultAction)
             Button("Allow this release") { model.allowRelease(release) }
         } message: { release in
             Text(Self.confirmation(release))

@@ -31,7 +31,7 @@ MIN_DOMAINS = 1_000
 # A sudden collapse usually means a broken upstream build, not a safer internet.
 MIN_RATIO_OF_PREVIOUS = 0.5
 NEVER_LISTED = ['apple.com', 'google.com', 'github.com', 'cloudflare.com',
-                'anthropic.com', 'openai.com', 'example.com', 'getallay.ai']
+                'anthropic.com', 'openai.com', 'example.com']
 LABEL = re.compile(r'[a-z0-9-]{1,63}')
 SHA = re.compile(r'[0-9a-f]{40}')
 

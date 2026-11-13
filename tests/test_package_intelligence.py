@@ -310,12 +310,11 @@ def test_publisher_failure_does_not_replace_snapshot_or_cursor(tmp_path, monkeyp
 
 
 def test_signed_feed_wire_strings_match_the_existing_publisher():
-    """BoxCop consumes the feed published at getallay.ai. Its payload schema and
-    signature domain are fixed by that publisher; renaming either breaks verification."""
+    """Publisher and client share the BoxCop schema and signature domain."""
     from server import package_intelligence
-    assert package_intelligence.SCHEMA == 'allay.package-policy.v1'
-    assert package_intelligence.COMPRESSED_CONTEXT == b'allay.package-policy.zlib.v1\x00'
+    assert package_intelligence.SCHEMA == 'boxcop.package-policy.v1'
+    assert package_intelligence.COMPRESSED_CONTEXT == b'boxcop.package-policy.zlib.v1\x00'
     key = Ed25519PrivateKey.generate()
     envelope = json.loads(sign(payload(), key))
     key.public_key().verify(base64.b64decode(envelope['signature']),
-                            b'allay.package-policy.zlib.v1\x00' + base64.b64decode(envelope['payload']))
+                            b'boxcop.package-policy.zlib.v1\x00' + base64.b64decode(envelope['payload']))

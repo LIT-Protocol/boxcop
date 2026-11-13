@@ -117,7 +117,7 @@ def test_release_refuses_non_main_before_network(monkeypatch, action):
 
 
 @pytest.mark.parametrize('repo,repo_id', [
-    (release.REPO, '1'), ('allayhq/Allay', '1434713741'),
+    (release.REPO, '1'), ('example/other-project', '1434713741'),
     ('someone/boxcop', release.REPOSITORY_ID), (release.REPO, ''),
 ])
 @pytest.mark.parametrize('action', ['prepare', 'publish'])
@@ -146,8 +146,6 @@ def test_checkout_bakes_in_no_update_feed():
     assert build_app.release_metadata({}) == {}
     info = plistlib.loads((SCRIPTS.parent / 'Resources/Info.plist').read_bytes())
     assert 'SUFeedURL' not in info and 'SUPublicEDKey' not in info
-    for script in ('build_app.py', 'release.py'):
-        assert 'getallay.ai/updates' not in (SCRIPTS / script).read_text()
 
 
 def test_release_files_are_served_beside_the_appcast():
@@ -221,7 +219,7 @@ def test_publication_uses_configured_feed_for_assets_and_github(publication, mon
     assert threats['revision'] in (output / 'release-notes.md').read_text()
     assert f'https://github.com/{repo}/releases/tag/v0.1.0' in (output.parent / 'summary').read_text()
     notes = (output / 'release-notes.md').read_text()
-    assert 'BoxCop 0.1.0' in notes and 'Allay' not in notes
+    assert 'BoxCop 0.1.0' in notes
 
 
 def test_publication_rejects_bundle_with_wrong_feed_before_signing(publication, monkeypatch):

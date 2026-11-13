@@ -29,15 +29,14 @@ packaged release profile and channel, and the updater startup check.
 - A **Developer ID Application** certificate with its private key in the Keychain.
   With more than one, set `BOXCOP_SIGNING_IDENTITY` to the certificate's SHA-1.
 - The two **provisioning profiles**, by default
-  `~/.sentinel-lab/profiles/Allay_Developer_ID.provisionprofile` and
-  `~/.sentinel-lab/profiles/Allay_Network_Developer_ID.provisionprofile`. Override
+  `~/.sentinel-lab/profiles/BoxCop_Developer_ID.provisionprofile` and
+  `~/.sentinel-lab/profiles/BoxCop_Network_Developer_ID.provisionprofile`. Override
   with `BOXCOP_APP_PROFILE` and `BOXCOP_NETWORK_PROFILE`.
 - **Notarization credentials** saved in the Keychain with
   `xcrun notarytool store-credentials`, by default under the profile name
-  `sentinel-beta`, falling back to `allay-ci-local` (the lab Mac has used both names). Override with `BOXCOP_NOTARY_PROFILE`.
+  `sentinel-beta`. Override with `BOXCOP_NOTARY_PROFILE`.
 
-The profile file names and the `~/.sentinel-lab` directory keep their original
-names. The profiles are bound to the bundle identifiers `local.sentinel.endpoint`
+The signing profiles live in `~/.sentinel-lab` by default. The profiles are bound to the bundle identifiers `local.sentinel.endpoint`
 and `local.sentinel.endpoint.network-filter`, which is why BoxCop keeps those
 identifiers. The build checks each profile's identifier, team, expiry,
 entitlements and certificate before it starts.
@@ -50,7 +49,7 @@ Other variables:
 | `BOXCOP_VERSION` | Display version, `major.minor.patch`. |
 | `BOXCOP_EXTENSION_VERSION` | Build number shared by the app and the extension. Defaults to the current Unix time, so later builds replace earlier ones. |
 | `BOXCOP_PYTHON` | Python 3.12 executable. Default `python3.12`. |
-| `BOXCOP_PACKAGE_FEED_URL`, `BOXCOP_PACKAGE_FEED_PUBLIC_KEY_BASE64`, `BOXCOP_PACKAGE_FEED_MINIMUM_SEQUENCE` | The signed package malware feed. `build.sh` defaults to the existing Allay feed; see [package-registry-firewall.md](package-registry-firewall.md). |
+| `BOXCOP_PACKAGE_FEED_URL`, `BOXCOP_PACKAGE_FEED_PUBLIC_KEY_BASE64`, `BOXCOP_PACKAGE_FEED_MINIMUM_SEQUENCE` | The signed package malware feed. No feed is configured by default; see [package-registry-firewall.md](package-registry-firewall.md). |
 | `BOXCOP_UPDATE_FEED_URL`, `BOXCOP_UPDATE_PUBLIC_KEY` | In-app updates. Unset by default; see below. |
 
 The script never falls back to ad-hoc signing and does not install, launch or

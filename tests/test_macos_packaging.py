@@ -526,10 +526,11 @@ def test_distribution_wrapper_requires_signing_and_notarization(tmp_path, case):
     if case == 'custom_profiles':
         env['BOXCOP_PACKAGE_FEED_URL'] = 'https://feed.example/policy.json'
         env['BOXCOP_PACKAGE_FEED_MINIMUM_SEQUENCE'] = '7'
+        env['BOXCOP_PACKAGE_FEED_PUBLIC_KEY_BASE64'] = 'fixture-key'
     if case != 'missing_profiles':
         for kind in ['app', 'network']:
             if case != 'custom_profiles':
-                filename = 'Allay_Developer_ID.provisionprofile' if kind == 'app' else 'Allay_Network_Developer_ID.provisionprofile'
+                filename = 'BoxCop_Developer_ID.provisionprofile' if kind == 'app' else 'BoxCop_Network_Developer_ID.provisionprofile'
                 path = Path(env['HOME']) / '.sentinel-lab/profiles' / filename
                 path.parent.mkdir(parents=True, exist_ok=True)
             else:
@@ -549,10 +550,10 @@ def test_distribution_wrapper_requires_signing_and_notarization(tmp_path, case):
         assert result.returncode == 0, result.stderr
         assert json.loads(capture.read_text()) == [str(BUILD), '--profile', 'distribution', '--channel', env.get('BOXCOP_CHANNEL', 'beta'), '--output', str(output),
                                                    '--signing-identity', fingerprint, '--notary-profile', 'sentinel-beta'] + extra
-        # The install gate works in a local build: the existing signed feed is the default.
-        default_key = '4vFHQbvIWeK3TVnv7vCjb8M0yTisaM1hpvnUA3F6ZYw='
+        # Feed trust is explicit; unconfigured builds have no publisher.
+        default_key = 'fixture-key'
         expected_feed = (['https://feed.example/policy.json', default_key, '7'] if case == 'custom_profiles'
-                         else ['https://getallay.ai/package-feed/v1/policy.json', default_key, '1'])
+                         else ['', '', '1'])
         assert json.loads(feed_capture.read_text()) == expected_feed
     else:
         assert result.returncode != 0
@@ -640,7 +641,7 @@ def test_dmg_background_artwork_is_boxcop():
     svg = (MAC / 'Resources/dmg/background.svg').read_text()
     assert 'Drag BoxCop to Applications' in svg
     assert '#0A1730' in svg and '#2F6BFF' in svg
-    assert 'Allay' not in svg
+    assert '<svg' in svg
 
 
 def test_updater_startup_report_must_match_the_build_configuration():

@@ -60,14 +60,9 @@ def install(args):
     if not (app / 'Contents/MacOS/BoxCop').is_file():
         sys.exit(f'{app} is not a BoxCop.app')
     preflight(args)
-    # Allay shares BoxCop's bundle identifier, so only one of them may be in /Applications.
     ssh(args, f'''set -e
 mkdir -p ~/{GUEST_WORK}
 pkill -x BoxCop || true; pkill -x Sentinel || true; sleep 1
-if [ -d /Applications/Allay.app ]; then
-  /Applications/Allay.app/Contents/MacOS/Sentinel --host-agent-integrations remove >/dev/null 2>&1 || true
-  rm -rf ~/SentinelLab/Allay-before-boxcop.app && mv /Applications/Allay.app ~/SentinelLab/Allay-before-boxcop.app
-fi
 rm -rf /Applications/BoxCop.app''')
     print('copying BoxCop.app to the guest')
     tar = subprocess.Popen(['tar', '-C', str(app.parent), '-cf', '-', app.name], stdout=subprocess.PIPE)

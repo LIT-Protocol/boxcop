@@ -1,5 +1,5 @@
 {
-  "schema": "allay.security-feed-review.v1",
+  "schema": "boxcop.security-feed-review.v1",
   "items": [
     {
       "id": "pwn:https://pwn.watch/i/adobe-commerce-magento-blockstrap-cve-2026-103849",
@@ -19,7 +19,7 @@
       "id": "pwn:https://pwn.watch/i/android-sms-of-death-wap-push-dos-cve-2026-58882",
       "fingerprint": "e41b486af36aacf141ba7fc25f6bbd2ff0bc58636141b39ff3aad8a3db6c1c57",
       "status": "out_of_scope",
-      "rationale": "Android telephony is outside this macOS endpoint product. Carrier/device patch verification requires an Android control plane; no Allay prevention is asserted.",
+      "rationale": "Android telephony is outside this macOS endpoint product. Carrier/device patch verification requires an Android control plane; no BoxCop prevention is asserted.",
       "evidence": [
         "server/software_inventory.py",
         "server/exposure_advisories.py",
@@ -148,7 +148,7 @@
       "id": "pwn:https://pwn.watch/i/edk2-pxe-icmp-preboot-rce-cve-2026-97631",
       "fingerprint": "e93acd4d463b5ff66cc8e27bfaf0f9837a6186b4c912267a2abb7eb8a78fb72f",
       "status": "out_of_scope",
-      "rationale": "UEFI PXE pre-boot execution is outside Allay's macOS user-space and agent-hook boundary. Follow the hardware vendor's firmware guidance; application rules cannot establish firmware remediation.",
+      "rationale": "UEFI PXE pre-boot execution is outside BoxCop's macOS user-space and agent-hook boundary. Follow the hardware vendor's firmware guidance; application rules cannot establish firmware remediation.",
       "evidence": [
         "server/software_inventory.py",
         "server/exposure_advisories.py",
@@ -159,7 +159,7 @@
       "id": "pwn:https://pwn.watch/i/electrum-malicious-server-rbf-fee-bump-theft",
       "fingerprint": "18c152ab9f2d8b2107d7de90b4fa34a13ec358c46090b397fc781574eaa1d731",
       "status": "partial",
-      "rationale": "Electrum app inventory advises upgrading before the reviewed fee-bump fix. Allay does not validate signed transaction outputs or mediate wallet signing; independently verify the transaction.",
+      "rationale": "Electrum app inventory advises upgrading before the reviewed fee-bump fix. BoxCop does not validate signed transaction outputs or mediate wallet signing; independently verify the transaction.",
       "evidence": [
         "server/software_inventory.py",
         "server/exposure_advisories.py",
@@ -479,7 +479,7 @@
       "id": "pwn:https://pwn.watch/i/opencode-mcp-oauth-rce-windows",
       "fingerprint": "85e1bd3838276d4efd2f9818e9dc9c5eaae4b965328b02fca6da8c6e01004681",
       "status": "out_of_scope",
-      "rationale": "The feed describes Windows/WSL PowerShell injection, outside this macOS product. Shared MCP trust remains a broader gap; Allay has no universal MCP gateway. Verify platform applicability before creating any Mac rule.",
+      "rationale": "The feed describes Windows/WSL PowerShell injection, outside this macOS product. Shared MCP trust remains a broader gap; BoxCop has no universal MCP gateway. Verify platform applicability before creating any Mac rule.",
       "evidence": [
         "server/software_inventory.py",
         "server/exposure_advisories.py",
@@ -503,7 +503,7 @@
       "id": "pwn:https://pwn.watch/i/php2shell-cve-2026-109618-109619",
       "fingerprint": "8bd265811bd91a104b4ab852cb33be2c26700edf41678dadb0bedd38c55bdfbf",
       "status": "partial",
-      "rationale": "PHP branch baselines plus a separate session-upload configuration review exist. Allay cannot determine live web-server settings, verify remote hosts or replace PHP patching/WAF controls.",
+      "rationale": "PHP branch baselines plus a separate session-upload configuration review exist. BoxCop cannot determine live web-server settings, verify remote hosts or replace PHP patching/WAF controls.",
       "evidence": [
         "server/software_inventory.py",
         "server/exposure_advisories.py",
@@ -595,7 +595,7 @@
       "id": "pwn:https://pwn.watch/i/thales-sentinel-keys-server-unauth-rce-cve-2026-78403",
       "fingerprint": "e0f7f0be5d5ce23a9f281ab4e1675e8bda284083c6ee3888d58db7a8caece875",
       "status": "out_of_scope",
-      "rationale": "The feed describes a Windows SYSTEM service in Thales Sentinel Keys Server, a different product from this repository. Allay has no Windows service inventory or prevention; assess affected hosts with vendor guidance.",
+      "rationale": "The feed describes a Windows SYSTEM service in Thales Sentinel Keys Server, a different product from this repository. BoxCop has no Windows service inventory or prevention; assess affected hosts with vendor guidance.",
       "evidence": [
         "server/software_inventory.py",
         "server/exposure_advisories.py",
@@ -695,7 +695,7 @@
       "id": "zero-wire:https://radar.cloudflare.com/security/zero-wire/php2shell",
       "fingerprint": "8a425694f99a80805dd9c7f5931a61e40170775151a2e1c4103220e50d87964d",
       "status": "partial",
-      "rationale": "PHP branch baselines plus a separate session-upload configuration review exist. Allay cannot determine live web-server settings, verify remote hosts or replace PHP patching/WAF controls.",
+      "rationale": "PHP branch baselines plus a separate session-upload configuration review exist. BoxCop cannot determine live web-server settings, verify remote hosts or replace PHP patching/WAF controls.",
       "evidence": [
         "server/software_inventory.py",
         "server/exposure_advisories.py",
@@ -721,7 +721,7 @@
       "id": "pwn:https://pwn.watch/i/android-november-2026-security-bulletin-cve-2026-58868",
       "fingerprint": "ceeae184c1335b044e3c9563861e6fe0bdedaaf4627e8163b3e13e5ff3137ee2",
       "status": "out_of_scope",
-      "rationale": "Android Framework/System and vendor patch levels are outside the local macOS inventory and hook boundary. Device administrators must verify the installed Android security patch level against the bulletin; Allay cannot verify phone remediation.",
+      "rationale": "Android Framework/System and vendor patch levels are outside the local macOS inventory and hook boundary. Device administrators must verify the installed Android security patch level against the bulletin; BoxCop cannot verify phone remediation.",
       "evidence": [
         "https://source.android.com/docs/security/bulletin/2026/2026-11-01",
         "docs/software-exposure.md",
@@ -732,7 +732,7 @@
       "id": "pwn:https://pwn.watch/i/apt29-watering-hole-ios-android-n-day-exploits-plerdy",
       "fingerprint": "25d1bc1869dfab523750012c32e296e18e1fd1aefa71afb0cab46ed0f18d9290",
       "status": "out_of_scope",
-      "rationale": "The researcher describes iOS and Android browser exploit chains. Allay does not inventory phones or inspect browser payloads; update affected mobile devices and investigate exposure through the mobile owner. No campaign or compromised-site hostname is added to blocking policy.",
+      "rationale": "The researcher describes iOS and Android browser exploit chains. BoxCop does not inventory phones or inspect browser payloads; update affected mobile devices and investigate exposure through the mobile owner. No campaign or compromised-site hostname is added to blocking policy.",
       "evidence": [
         "https://www.sekoia.com/blog/poisoned-source-apt29-watering-holes-targets-mobile-devices-with-n-day-exploits",
         "docs/outgoing-connections.md",
@@ -781,7 +781,7 @@
       "id": "pwn:https://pwn.watch/i/cisco-ucs-central-authenticated-rce-cve-2026-76506",
       "fingerprint": "063c31ce3ca7fb57783b3bd7f1ede8684b88cca6ee95241d76ce142ce5e6b8c4",
       "status": "out_of_scope",
-      "rationale": "UCS Central web-management requests execute on the remote management appliance, outside Allay agent hooks and Mac inventory. The asset owner must verify the UCS Central update and authorized access; no Mac application version substitutes for that assessment.",
+      "rationale": "UCS Central web-management requests execute on the remote management appliance, outside BoxCop agent hooks and Mac inventory. The asset owner must verify the UCS Central update and authorized access; no Mac application version substitutes for that assessment.",
       "evidence": [
         "https://sec.cloudapps.cisco.com/security/center/content/CiscoSecurityAdvisory/cisco-sa-cucs-rce-LzHSFRDQ",
         "server/host_agents.py",
@@ -793,7 +793,7 @@
       "id": "pwn:https://pwn.watch/i/debian-apt-http-resume-mitm-root-rce-cve-2026-109518",
       "fingerprint": "33ff1d751139ae739e880b73361dfbaf17bbf49173c644fe0a04151482ea4c5c",
       "status": "out_of_scope",
-      "rationale": "APT download verification and privileged package installation occur on Debian hosts or Linux guests. Allay does not inspect their package manager or mediate its post-verification file handling. Update APT through the distribution and verify the host package; Mac download reputation is not a fix.",
+      "rationale": "APT download verification and privileged package installation occur on Debian hosts or Linux guests. BoxCop does not inspect their package manager or mediate its post-verification file handling. Update APT through the distribution and verify the host package; Mac download reputation is not a fix.",
       "evidence": [
         "https://lists.debian.org/debian-security-announce/2026/msg00526.html",
         "server/supply_chain.py",
@@ -805,7 +805,7 @@
       "id": "pwn:https://pwn.watch/i/docker-sandboxes-git-config-escape-cve-2026-121614",
       "fingerprint": "dce243c93454565149f2de4abea68113c7fdd8e4463d571b80637c909a92c65d",
       "status": "gap",
-      "rationale": "Docker confirms host Git execution from sandbox-controlled repository configuration, but Allay has no Sandboxes-specific offline version discovery or hook on Docker host-side Git. Add a bounded vendor-verified sbx metadata reader and affected/fixed/unknown fixtures, distinct from Docker Desktop versions. Upgrade Sandboxes and review writable mounts; ordinary Git commands and skill scanning do not establish prevention.",
+      "rationale": "Docker confirms host Git execution from sandbox-controlled repository configuration, but BoxCop has no Sandboxes-specific offline version discovery or hook on Docker host-side Git. Add a bounded vendor-verified sbx metadata reader and affected/fixed/unknown fixtures, distinct from Docker Desktop versions. Upgrade Sandboxes and review writable mounts; ordinary Git commands and skill scanning do not establish prevention.",
       "evidence": [
         "https://github.com/docker/sbx-releases/releases/tag/v0.50.0",
         "server/software_inventory.py",
@@ -833,7 +833,7 @@
       "id": "pwn:https://pwn.watch/i/node-red-missing-authentication-cve-2026-58115",
       "fingerprint": "feff191b3ba7f33515d3864a501632b8887f9983c640ba9e9821a020d70d5417",
       "status": "partial",
-      "rationale": "Exact npm node-red metadata now triggers a tested configuration review at every version, including unknown versions. The Siemens Industrial OS fix is not an npm version cutoff. Allay does not evaluate settings.js, verify effective adminAuth/reachability or inspect running flows; the operator must secure the editor/admin API and review deployed flows.",
+      "rationale": "Exact npm node-red metadata now triggers a tested configuration review at every version, including unknown versions. The Siemens Industrial OS fix is not an npm version cutoff. BoxCop does not evaluate settings.js, verify effective adminAuth/reachability or inspect running flows; the operator must secure the editor/admin API and review deployed flows.",
       "evidence": [
         "https://cert-portal.siemens.com/productcert/html/ssa-834709.html",
         "https://nodered.org/docs/user-guide/runtime/securing-node-red",
@@ -860,7 +860,7 @@
       "id": "pwn:https://pwn.watch/i/puppet-openvox-server-rce-impersonation-cve-2026-115731",
       "fingerprint": "32b40510efbc26c4f9e97424e446f6b54f0dc7bb30c5e79c3fc7dee1e5e72a53",
       "status": "out_of_scope",
-      "rationale": "The vulnerable report deserialization and certificate-name authorization run on Puppet/OpenVox servers. A managed Mac agent can receive malicious actions from a compromised controller, but its local version cannot establish server remediation and Allay has no controller/CA integration. Server owners must update server components, verify authorization rules and investigate exposed CA keys and managed nodes.",
+      "rationale": "The vulnerable report deserialization and certificate-name authorization run on Puppet/OpenVox servers. A managed Mac agent can receive malicious actions from a compromised controller, but its local version cannot establish server remediation and BoxCop has no controller/CA integration. Server owners must update server components, verify authorization rules and investigate exposed CA keys and managed nodes.",
       "evidence": [
         "https://voxpupuli.org/blog/2026/11/03/critical-cve-updates/",
         "server/software_inventory.py",
@@ -884,7 +884,7 @@
       "id": "pwn:https://pwn.watch/i/seppmail-secure-email-gateway-cve-2026-114424",
       "fingerprint": "5b3b05dfa7204cbbce5df7f0f9fc7a612da6ddb977437930286b85cb9d1a92ca",
       "status": "out_of_scope",
-      "rationale": "The affected address rules and file-transfer workers run in a SEPPmail gateway appliance, not in a Mac mail client. Allay cannot inspect incoming gateway processing or active appliance rules. Gateway owners must update firmware, verify relevant features and investigate suspicious messages/files.",
+      "rationale": "The affected address rules and file-transfer workers run in a SEPPmail gateway appliance, not in a Mac mail client. BoxCop cannot inspect incoming gateway processing or active appliance rules. Gateway owners must update firmware, verify relevant features and investigate suspicious messages/files.",
       "evidence": [
         "https://docs.seppmail.com/en/20_revision-history.html",
         "docs/software-exposure.md",
@@ -896,7 +896,7 @@
       "id": "pwn:https://pwn.watch/i/solarwinds-dameware-cve-2026-28336",
       "fingerprint": "54fb389514fe32580e66c52ef2cf28a2ac77b82a948ac3c95c7dd52aab587d79",
       "status": "unresolved",
-      "rationale": "The vendor confirms authenticated command injection affecting a remotely controlled host, but the reviewed advisory/CNA record does not establish which macOS targets or components, if any, are affected. Allay has no Dameware-specific inventory or remote-control mediation. Verify target-platform/component applicability with SolarWinds before adding Mac identities or ranges; update the Dameware control deployment per the vendor.",
+      "rationale": "The vendor confirms authenticated command injection affecting a remotely controlled host, but the reviewed advisory/CNA record does not establish which macOS targets or components, if any, are affected. BoxCop has no Dameware-specific inventory or remote-control mediation. Verify target-platform/component applicability with SolarWinds before adding Mac identities or ranges; update the Dameware control deployment per the vendor.",
       "evidence": [
         "https://www.solarwinds.com/trust-center/security-advisories/CVE-2026-28336",
         "https://raw.githubusercontent.com/CVEProject/cvelistV5/main/cves/2026/28xxx/CVE-2026-28336.json",
@@ -922,7 +922,7 @@
       "id": "pwn:https://pwn.watch/i/watchguard-authpoint-gateway-auth-bypass-cve-2026-121637",
       "fingerprint": "c3998729ba93136e6ee6a6c3770d71425389bbbd1261a089874ab04acce85bd1",
       "status": "out_of_scope",
-      "rationale": "AuthPoint Authentication Gateway runs on Windows Server and is distinct from the macOS Logon app. Allay does not verify gateway LDAP/RADIUS callbacks, inter-service TLS or replay protection. The gateway owner must update the gateway and verify service activation; a Mac client update cannot establish remediation.",
+      "rationale": "AuthPoint Authentication Gateway runs on Windows Server and is distinct from the macOS Logon app. BoxCop does not verify gateway LDAP/RADIUS callbacks, inter-service TLS or replay protection. The gateway owner must update the gateway and verify service activation; a Mac client update cannot establish remediation.",
       "evidence": [
         "https://psirt.watchguard.com/",
         "https://www.watchguard.com/support/release-notes/cloud/Content/en-US/AuthPoint/EN_release-notes_authpoint.html",
@@ -935,7 +935,7 @@
       "id": "pwn:https://pwn.watch/i/xen-xsa-523-grant-copy-guest-escape-cve-2026-102703",
       "fingerprint": "6b288ccc0dacf2f8f71194449f771c496474f395a4e6a0e23ba4a05354da194c",
       "status": "out_of_scope",
-      "rationale": "Xen grant-copy isolation is a hypervisor boundary, outside macOS inventory and agent hooks. Allay cannot patch or verify dom0 or other guests. Hypervisor owners must apply Xen/distribution fixes and verify host activation; VM image or application updates are insufficient.",
+      "rationale": "Xen grant-copy isolation is a hypervisor boundary, outside macOS inventory and agent hooks. BoxCop cannot patch or verify dom0 or other guests. Hypervisor owners must apply Xen/distribution fixes and verify host activation; VM image or application updates are insufficient.",
       "evidence": [
         "https://xenbits.xen.org/xsa/advisory-523.html",
         "docs/software-exposure.md",

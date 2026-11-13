@@ -211,8 +211,7 @@ def engine_freeze_options(root=None, mac=MAC):
 def prepare_package_channel(work):
     """Embed only a public trust pin. Missing configuration keeps activation off.
 
-    BoxCop has no feed of its own yet. build.sh points these variables at the
-    existing signed Allay feed; see docs/package-registry-firewall.md.
+    Builders supply their feed URL and public key; see docs/package-registry-firewall.md.
     """
     import importlib.util
     spec = importlib.util.spec_from_file_location('boxcop_package_channel', ROOT / 'server/package_channel.py')

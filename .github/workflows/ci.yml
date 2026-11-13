@@ -63,11 +63,9 @@ jobs:
         run: bash desktop/macos/scripts/ci_swift_tests.sh 120 "$RUNNER_TEMP/out/swift-diagnostics"
       - name: Build limited-development app (ad-hoc signed, no network extension)
         env:
-          # BoxCop consumes the existing signed Allay package feed until it hosts its own.
-          # These are the same public values build.sh uses by default.
-          BOXCOP_PACKAGE_FEED_URL: https://getallay.ai/package-feed/v1/policy.json
-          BOXCOP_PACKAGE_FEED_PUBLIC_KEY_BASE64: 4vFHQbvIWeK3TVnv7vCjb8M0yTisaM1hpvnUA3F6ZYw=
-          BOXCOP_PACKAGE_FEED_MINIMUM_SEQUENCE: "1"
+          BOXCOP_PACKAGE_FEED_URL: ${{ vars.BOXCOP_PACKAGE_FEED_URL }}
+          BOXCOP_PACKAGE_FEED_PUBLIC_KEY_BASE64: ${{ vars.BOXCOP_PACKAGE_FEED_PUBLIC_KEY_BASE64 }}
+          BOXCOP_PACKAGE_FEED_MINIMUM_SEQUENCE: ${{ vars.BOXCOP_PACKAGE_FEED_MINIMUM_SEQUENCE }}
         run: python3.12 desktop/macos/scripts/build_app.py --profile limited-development --output "$RUNNER_TEMP/out"
       - name: Launch smoke (no engine and no audit data before setup)
         run: bash desktop/macos/scripts/ci_launch_smoke.sh "$RUNNER_TEMP/out/BoxCop.app" "$RUNNER_TEMP/out"

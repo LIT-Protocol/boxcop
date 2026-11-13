@@ -54,8 +54,8 @@ enter shell history:
 
 ```sh
 base64 -i ~/.sentinel-lab/ci/identity.p12 | gh secret set BOXCOP_CERTIFICATE_BASE64 --repo LIT-Protocol/boxcop
-base64 -i ~/.sentinel-lab/profiles/Allay_Developer_ID.provisionprofile | gh secret set BOXCOP_APP_PROFILE_BASE64 --repo LIT-Protocol/boxcop
-base64 -i ~/.sentinel-lab/profiles/Allay_Network_Developer_ID.provisionprofile | gh secret set BOXCOP_NETWORK_PROFILE_BASE64 --repo LIT-Protocol/boxcop
+base64 -i ~/.sentinel-lab/profiles/BoxCop_Developer_ID.provisionprofile | gh secret set BOXCOP_APP_PROFILE_BASE64 --repo LIT-Protocol/boxcop
+base64 -i ~/.sentinel-lab/profiles/BoxCop_Network_Developer_ID.provisionprofile | gh secret set BOXCOP_NETWORK_PROFILE_BASE64 --repo LIT-Protocol/boxcop
 gh secret set BOXCOP_CERTIFICATE_PASSWORD --repo LIT-Protocol/boxcop   # prompts for the value
 ```
 

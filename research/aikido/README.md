@@ -1,16 +1,6 @@
-# Aikido Endpoint Protection: hands-on look, 2026-11-12
+# Aikido Device Protection research
 
-Aikido Endpoint Protection 1.10.33 (the "Device Protection" product named as the
-closest competitor in [issue #149](https://github.com/allayhq/Allay/issues/149))
-was installed in a throwaway macOS 26.6.2 VM and driven through its GUI and CLI.
-This note records what the app shows, how little UI it has, how that compares
-with Allay, and what it implies for the plan in #149.
-
-**Bottom line.** Aikido ships a much wider install gate than Allay behind a far
-smaller UI: three tabs, one status pill, no local settings. It does nothing for
-#149's other five layers on the device, as far as this test could see. Its
-costs are a required account token, system-wide TLS interception, and block
-messages that tell the user almost nothing.
+Historical evaluation notes from testing the macOS application.
 
 ## How this was tested
 
@@ -146,87 +136,3 @@ Inferred, not verified: strings in the daemon binary name collectors for Claude
 Code, Claude Desktop, Codex and Cursor, and MCP server config. This suggests it
 inventories agent installs and MCP servers for the dashboard. No such data
 appeared in the device UI.
-
-## How minimal it is, next to Allay
-
-Allay reference renders below come from this worktree's
-`Sentinel --dev-interface-preview` (commit `2e2552da`), so they show the real
-views with sample data, not a running install.
-
-| | Aikido 1.10.33 | Allay (this worktree) |
-| --- | --- | --- |
-| Top-level destinations | 3 tabs | 6 sidebar pages: Home, Approvals, Connections, Activity, Policies, Settings |
-| Status | One pill: "Protected" | Per-layer status rows on Home, plus a sidebar monitoring state |
-| Local settings and toggles | None | Many: review policies, spend threshold, package routing, install-script protection, crash reports, monitoring pause |
-| Explanatory text | One or two sentences per screen | Several paragraphs of limits and caveats on most pages |
-| Menu bar | Status line and "Open Dashboard" | Menu that opens each page |
-| Block notification | Package, one tag, two buttons | Alert panels with reason and actions such as "Allow once" |
-| Block detail | Package, version, binary hash | Reason, agent, command, optional local-model summary and concerns |
-| User decisions on device | None; ask an admin | Approve or reject held actions; allow once |
-| Setup | Token, two system extensions, VPN config, CA, reboot | Onboarding list; each protection is opt-in |
-| Account | Required (token) | "No account required" |
-
-![Allay Home](allay-reference/home-active.png)
-
-![Allay Approvals](allay-reference/approvals.png)
-
-![Allay Connections](allay-reference/connections.png)
-
-![Allay approval request card](allay-reference/approval-request.png)
-
-Three observations on the difference:
-
-1. **Aikido's device app is a receipt printer, not a console.** Policy lives in the cloud dashboard, so the device has nothing to configure. Allay puts policy on the device, so some of its extra surface is inherent to "local first, no account".
-2. **Much of Allay's surface is not inherent.** Home, Connections and Policies each carry paragraphs of scope caveats, disabled buttons and setup controls. Aikido answers "am I protected?" with one word; Allay's Home answers it with five rows in four different states.
-3. **Aikido is too thin where it matters.** A blocked user learns "Malware" and a hash. There is no why, no source, no chain back to the agent, and no next step other than asking an admin. Allay's approval card already does better on all four.
-
-## Against the plan in issue #149
-
-### Where Aikido is ahead on things #149 wants
-
-| #149 item | Aikido today | Allay today (per #149 and docs) |
-| --- | --- | --- |
-| Minimum release age (roadmap 2) | Shipped; suppresses versions in registry metadata | Not built |
-| Ecosystem breadth (roadmap 2) | 15 ecosystems, including IDE and browser extensions and Skills.sh | npm and PyPI lists; npm/pnpm routing only |
-| No per-tool routing | Network extension catches every client, including ones agents launch | Opt-in npm/pnpm routing; cached packages and other managers bypass |
-| "Protected only when enforcing" (principle 5) | One pill, and `aikido-doctor status` names the missing step | Status spread across rows; wording varies by layer |
-| Self-test | A "Test" button per ecosystem with a safe known-bad package | None in the app |
-| Plaintext secrets (roadmap 5) | Shell-history secret scan with rewrite, flag-gated | Not built |
-| MCP and agent discovery (roadmap 2) | Likely inventoried for the dashboard (inferred) | Not built |
-| Diagnostics | One CLI covering status, events, certs, repair and support bundle | No equivalent single tool |
-
-The self-test is cheap and worth copying outright: a harmless published
-package that Allay's feed always blocks, and a button that shows the command.
-
-### Gaps in Aikido that #149's thesis depends on
-
-| #149 layer | What Aikido showed on the device |
-| --- | --- |
-| 1. Install gate | Strong. Reputation plus release age only; an unknown, old-enough package is allowed. |
-| 2. Containment | Nothing. An allowed package's install script runs with full user access. |
-| 3. Outbound control | Only the 12 registry hosts are inspected. No general per-app or threat-list blocking was seen. An admin-triggered "lockdown" exists but was not tested. |
-| 4. Agent action checks | Nothing. No hooks, no held actions, no approval inbox. |
-| 5. Machine health | Inventory is collected and sent to the cloud; nothing is shown to the user. |
-| 6. Smart triage | Nothing on the device. `AiFeaturesEnabled` exists as a flag but was off; what it does is unknown. |
-
-Other gaps that matter for #149's "individuals" audience:
-
-- **No agent context.** The event names a node binary hash. It cannot say "Claude Code ran this", which #149 lists as the reason one app beats separate tools.
-- **No local exception path.** The only route is "request" to an admin. A solo user with their own token has to go to the web dashboard.
-- **Silent breakage.** Release-age suppression produced a confusing npm error with no notification, and broke Aikido's own test. This is the "protection applied blindly" failure #149's triage layer is meant to prevent.
-- **Account and cloud required.** Token enrollment, and device identifiers and software inventory leave the machine. #149's "local first, no account, nothing uploaded by default" is a real difference.
-- **Heavy trust footprint.** A root CA, TLS interception of package traffic, edits to shell profiles and git config, and up to 470 MB for the network extension. Allay's registry proxy needs none of that, at the cost of coverage.
-
-### What this suggests for #149
-
-1. **The "one app instead of six tools" claim needs care.** Aikido already is one app for layer 1 across 15 ecosystems. Allay's differentiator is layers 2 to 4 and 6 plus local-first, not the install gate.
-2. **Minimum release age and wider ecosystem coverage are table stakes** for the install gate. Without them Allay loses the layer-1 comparison on a feature list.
-3. **If Allay adds release age, pair it with an explanation at the point of failure.** Aikido's version shows what happens without one.
-4. **Allay's UI should move toward Aikido's density for the default view** and keep its detail for the block itself: one status word, one list of events, and caveats moved out of the main pages into help.
-5. **System-wide interception is the coverage/trust trade-off to decide deliberately.** Aikido covers every client by intercepting TLS. #149's Pipelock-style "optional strict mode with TLS inspection" would put Allay in the same position, with the same CA and dotfile costs.
-
-## Reproducing
-
-The VM is named `aikido-test` under Tart. `ssh -F ~/.tart-app/ssh_config
-aikido-test` reaches it; the guest account is `admin` / `admin`. Inside the
-guest, `sudo aikido-doctor status` and `sudo aikido-doctor events` show state.

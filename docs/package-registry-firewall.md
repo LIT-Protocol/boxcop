@@ -73,25 +73,22 @@ request never reaches the public registry.
 
 ## Where the list comes from
 
-BoxCop does not have a malware feed of its own yet. Builds made with `build.sh`
-read the existing signed Allay feed:
+Configure a signed feed before building with either `build.sh` or `build_app.py`:
 
 ```sh
-export BOXCOP_PACKAGE_FEED_URL=https://getallay.ai/package-feed/v1/policy.json
-export BOXCOP_PACKAGE_FEED_PUBLIC_KEY_BASE64=4vFHQbvIWeK3TVnv7vCjb8M0yTisaM1hpvnUA3F6ZYw=
+export BOXCOP_PACKAGE_FEED_URL=https://YOUR-FEED-HOST/policy.json
+export BOXCOP_PACKAGE_FEED_PUBLIC_KEY_BASE64=YOUR_BASE64_ED25519_PUBLIC_KEY
 export BOXCOP_PACKAGE_FEED_MINIMUM_SEQUENCE=1
 ```
 
-`build.sh` sets these by default. Set them yourself before a limited-development
-build made with `build_app.py`. The build writes them into `channel.json` inside
-the engine. A build without them has no feed, and the app shows the install gate
-as "Unavailable".
+These are placeholders, not a hosted service. No feed is trusted by default;
+without configuration the install gate shows "Unavailable". See the publisher
+instructions below to generate a key and publish a snapshot. Provision the public
+key through a trusted channel independently of the feed host.
 
-The key is public. The app accepts a snapshot only if it is signed with the
-matching private key and its sequence number is not lower than the last one it
-saw, so the feed host cannot serve an altered or older list. The payload schema
-is still named `allay.package-policy.v1`. When BoxCop publishes its own feed, the
-three values change and nothing else does.
+The payload schema is `boxcop.package-policy.v1` and compressed signatures use
+`boxcop.package-policy.zlib.v1` followed by a NUL byte. Older publisher formats
+are incompatible; publish a new snapshot with this repository's tools.
 
 ## What is implemented
 

@@ -94,7 +94,7 @@ jobs:
       - name: Build, test, sign and notarize
         env:
           BOXCOP_CHANNEL: beta
-          # Optional overrides. Unset, build.sh uses the existing signed Allay package feed.
+          # Feed trust configuration. Unset: install gate unavailable.
           BOXCOP_PACKAGE_FEED_URL: ${{ vars.BOXCOP_PACKAGE_FEED_URL }}
           BOXCOP_PACKAGE_FEED_PUBLIC_KEY_BASE64: ${{ vars.BOXCOP_PACKAGE_FEED_PUBLIC_KEY_BASE64 }}
           BOXCOP_PACKAGE_FEED_MINIMUM_SEQUENCE: ${{ vars.BOXCOP_PACKAGE_FEED_MINIMUM_SEQUENCE }}

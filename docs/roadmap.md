@@ -1,7 +1,6 @@
 # Roadmap
 
-This is the plan from [allayhq/Allay#149](https://github.com/allayhq/Allay/issues/149),
-adjusted for what BoxCop has today. [layers.md](layers.md) describes the current
+This roadmap describes the next steps for BoxCop. [layers.md](layers.md) describes the current
 state of each layer.
 
 **Priority order:** distinctive prevention, then experience, then supporting
@@ -24,9 +23,8 @@ features, then breadth for organizations.
    a plaintext-secret scan.
 6. **Cover desktop agents.** Claude Cowork and the ChatGPT and Codex apps, where
    hooks or process identity allow.
-7. **Open the project.** The license is done: BoxCop is Apache-2.0 licensed. The
-   repository is still private. What remains before it opens: a threat model,
-   known limits, reproducible demos and a disclosure process.
+7. **Open the project.** BoxCop is Apache-2.0 licensed. Release preparation
+   includes a threat model, reproducible demos and a disclosure process.
 8. **A control plane for organizations**, when organizations ask for it: central
    policy and exceptions, fleet status, audit export. BoxCop has none of this today.
 
@@ -36,8 +34,7 @@ features, then breadth for organizations.
   per-package host list, and test more escape routes.
 - Give BoxCop its own bundle identifiers and provisioning profiles. It currently
   keeps `local.sentinel.endpoint` because the profiles we hold are bound to it.
-- Host BoxCop's own package malware feed. It currently reads the existing Allay
-  feed.
+- Host a public signed package malware feed. Builders currently configure their own.
 - Accept smart triage in the VM lab. It has not passed an acceptance run; see
   [vm-lab.md](vm-lab.md).
 - Set up an update feed. Builds have no in-app updates until one is configured;

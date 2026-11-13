@@ -16,15 +16,15 @@ provisioning profiles, and saved notarytool credentials.
 
 Optional environment variables:
   BOXCOP_SIGNING_IDENTITY  Certificate SHA-1 (required if multiple identities exist)
-  BOXCOP_NOTARY_PROFILE    Saved Keychain profile (default: sentinel-beta, then allay-ci-local)
+  BOXCOP_NOTARY_PROFILE    Saved Keychain profile (default: sentinel-beta)
   BOXCOP_KEYCHAIN_PATH     Optional temporary CI keychain for notarization
   BOXCOP_PYTHON            Python 3.12 executable (default: python3.12)
   BOXCOP_VERSION           Optional display version (major.minor.patch; set by release CI)
   BOXCOP_CHANNEL           beta (default) or stable; both include every protection
-  BOXCOP_APP_PROFILE       App profile (default: ~/.sentinel-lab/profiles/Allay_Developer_ID.provisionprofile)
-  BOXCOP_NETWORK_PROFILE   Network profile (default: ~/.sentinel-lab/profiles/Allay_Network_Developer_ID.provisionprofile)
+  BOXCOP_APP_PROFILE       App profile (default: ~/.sentinel-lab/profiles/BoxCop_Developer_ID.provisionprofile)
+  BOXCOP_NETWORK_PROFILE   Network profile (default: ~/.sentinel-lab/profiles/BoxCop_Network_Developer_ID.provisionprofile)
   BOXCOP_EXTENSION_VERSION Override extension build number (default: current Unix timestamp)
-  BOXCOP_PACKAGE_FEED_URL                 Signed package malware feed (default: the Allay feed)
+  BOXCOP_PACKAGE_FEED_URL                 Signed package malware feed (unset: install gate unavailable)
   BOXCOP_PACKAGE_FEED_PUBLIC_KEY_BASE64   Ed25519 key that feed is verified with
   BOXCOP_PACKAGE_FEED_MINIMUM_SEQUENCE    Lowest feed sequence this build accepts (default: 1)
   BOXCOP_UPDATE_FEED_URL   Sparkle appcast URL. Unset (default): the build has no in-app updates
@@ -70,8 +70,8 @@ fi
 [[ -z "${BOXCOP_PROFILE+x}" ]] || fail 'BOXCOP_PROFILE has been retired. Use BOXCOP_CHANNEL=beta or stable; both build the full distribution. For limited development builds use build_app.py --profile limited-development.'
 channel="${BOXCOP_CHANNEL:-beta}"
 [[ "$channel" == beta || "$channel" == stable ]] || fail 'BOXCOP_CHANNEL must be beta or stable.'
-app_profile="${BOXCOP_APP_PROFILE:-$HOME/.sentinel-lab/profiles/Allay_Developer_ID.provisionprofile}"
-network_profile="${BOXCOP_NETWORK_PROFILE:-$HOME/.sentinel-lab/profiles/Allay_Network_Developer_ID.provisionprofile}"
+app_profile="${BOXCOP_APP_PROFILE:-$HOME/.sentinel-lab/profiles/BoxCop_Developer_ID.provisionprofile}"
+network_profile="${BOXCOP_NETWORK_PROFILE:-$HOME/.sentinel-lab/profiles/BoxCop_Network_Developer_ID.provisionprofile}"
 [[ -f "$app_profile" && -f "$network_profile" ]] || fail 'Distribution profiles missing from ~/.sentinel-lab/profiles. Set BOXCOP_APP_PROFILE and BOXCOP_NETWORK_PROFILE to override.'
 # The provisioning profiles are bound to the original bundle identifiers and still
 # carry their original file names. BoxCop keeps both until it has profiles of its own.
@@ -86,17 +86,15 @@ notary_ok() {
   xcrun notarytool "${args[@]}" >/dev/null 2>&1
 }
 profile=''
-for candidate in ${BOXCOP_NOTARY_PROFILE:-sentinel-beta allay-ci-local}; do
+for candidate in ${BOXCOP_NOTARY_PROFILE:-sentinel-beta}; do
   printf 'Checking notarization credentials for Keychain profile: %s\n' "$candidate"
   if notary_ok "$candidate"; then profile="$candidate"; break; fi
 done
 [[ -n "$profile" ]] || fail 'Notarization credentials unavailable. Save a Keychain profile with xcrun notarytool store-credentials and set BOXCOP_NOTARY_PROFILE to its name, then retry.'
 
-# Install gate: BoxCop has no malware feed of its own yet. It consumes the existing
-# signed Allay feed, so a local build blocks listed packages without extra setup.
-# The key is public; the feed is verified with it and never trusted without it.
-export BOXCOP_PACKAGE_FEED_URL="${BOXCOP_PACKAGE_FEED_URL:-https://getallay.ai/package-feed/v1/policy.json}"
-export BOXCOP_PACKAGE_FEED_PUBLIC_KEY_BASE64="${BOXCOP_PACKAGE_FEED_PUBLIC_KEY_BASE64:-4vFHQbvIWeK3TVnv7vCjb8M0yTisaM1hpvnUA3F6ZYw=}"
+# Feed trust must be configured by the builder; no publisher is trusted by default.
+export BOXCOP_PACKAGE_FEED_URL="${BOXCOP_PACKAGE_FEED_URL:-}"
+export BOXCOP_PACKAGE_FEED_PUBLIC_KEY_BASE64="${BOXCOP_PACKAGE_FEED_PUBLIC_KEY_BASE64:-}"
 export BOXCOP_PACKAGE_FEED_MINIMUM_SEQUENCE="${BOXCOP_PACKAGE_FEED_MINIMUM_SEQUENCE:-1}"
 
 output="${1:-$HOME/Downloads/BoxCop-${channel}-$(date +%Y%m%d-%H%M%S)}"

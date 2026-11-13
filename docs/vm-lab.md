@@ -132,9 +132,7 @@ the system extension in System Settings and allowing the network filter.
    only an override.
 
    `install` refuses a guest that is not a virtual Mac, has SIP off, or has a
-   different user at the desktop. It moves `/Applications/Allay.app` to
-   `~/SentinelLab/Allay-before-boxcop.app` (the two apps share a bundle identifier),
-   copies the app, checks its signature, Gatekeeper assessment and engine self-test,
+   different user at the desktop. It replaces the installed BoxCop app, checks its signature, Gatekeeper assessment and engine self-test,
    and puts a Node.js runtime in `~/SentinelLab/boxcop-acceptance`. `run` copies
    `tests/vm/guest_acceptance.py` to the guest and runs it there. `--sudo` lets the
    outbound checks add and remove a scoped resolver under `/etc/resolver`; the guest
@@ -172,8 +170,8 @@ Recorded on 2026-11-12 in "Sentinel Beta Acceptance" (macOS 14.6.1, SIP enabled,
 [evidence/vm-acceptance-2026-11-12.json](evidence/vm-acceptance-2026-11-12.json):
 31 checks passed, none failed, one was skipped.
 
-The build was installed over a running Allay beta. Its network extension replaced
-Allay's without a new macOS approval, because the identifiers and team are the same.
+The historical build replaced a predecessor beta with the same bundle identifiers
+and signing team, without a new macOS network extension approval.
 Setup was the one onboarding button; the app reported "Protected" about a minute
 later, once the malware feed had downloaded. A second build installed over the
 first replaced the extension again and kept every setting.

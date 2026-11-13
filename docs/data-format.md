@@ -176,5 +176,5 @@ decision.
 | `boxcop.software-inventory.v2` | `server/software_inventory.py` |
 | `boxcop.workflow-context.v1` | `server/workflow_context.py`, `BoxCopCore/WorkflowContext.swift` |
 | `boxcop.package-channel.v1` | `server/package_channel.py`: the feed URL and key pinned in a build |
-| `allay.package-policy.v1` | `server/package_intelligence.py`: the signed malware list. The name is unchanged because BoxCop reads the existing Allay feed. |
+| `boxcop.package-policy.v1` | `server/package_intelligence.py`: the signed malware list. Publisher and client use the BoxCop wire format. |
 | `boxcop.encrypted.v1` | `BoxCopCore/JournalEncryption.swift`: one encrypted journal record |

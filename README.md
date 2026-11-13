@@ -1,32 +1,16 @@
 # BoxCop
 
-BoxCop is a Mac app for computers that run AI agents. Agents such as Claude Code,
-Codex and Cursor work with your full access, and so does everything they install,
-download or write. BoxCop checks what agents install, contains what they run, and
-watches what leaves the machine. It runs locally, needs no account, and uploads
-nothing. It is licensed under Apache-2.0.
+Local protection for Macs that run AI coding agents.
 
-**Let your AI agents work. Keep your machine protected.**
+BoxCop checks package installs, contains npm install scripts, blocks connections
+to known threat domains, and checks agent actions before they run. It runs on your
+Mac without an account. Experimental local AI triage helps explain security events.
 
-**Status: limited macOS beta.** Each layer below exists and has known limits, which
-are listed next to it. BoxCop does not claim complete protection. A layer shows
-"On" only while it is enforcing; otherwise it shows "Off", "Needs setup" or
-"Unavailable", with the missing step. The app says "Protected" only when the four
-enforcing layers are all on.
+**Status: macOS beta.** Coverage is incomplete and depends on which protections
+you enable. BoxCop shows the state of each layer; see the limits below before
+relying on it.
 
-The product direction is described in
-[allayhq/Allay#149](https://github.com/allayhq/Allay/issues/149).
-
-## Who it is for
-
-1. **Developers who use coding agents.** They feel the risk today, and most
-   existing tooling targets them.
-2. **Anyone who uses a desktop agent.** They cannot evaluate a script, a skill or
-   an MCP server, so defaults and plain explanations matter more for them.
-3. **Security and platform teams**, later. They need the same protection managed
-   across many machines. BoxCop has no team features today.
-
-## The six layers
+## What it does
 
 | Risk | Layer | Built today | Current limits |
 | --- | --- | --- | --- |
@@ -37,144 +21,67 @@ The product direction is described in
 | The machine is already weak: outdated runtimes and apps | **5. Machine health** | An inventory of apps, Homebrew, Python, npm and runtimes, matched against reviewed findings. Guided updates for a few Homebrew formulae and Pillow. | Findings are hand-reviewed, not general CVE coverage. No Electron or Chromium runtime checks. No scan for plaintext secrets. |
 | Too many alerts, or protection applied blindly, so the user turns everything off | **6. Smart triage** | A bundled llama.cpp runtime with a local model reviews linked activity: network history together with the install gate, containment and agent check events. It returns concerns that cite the events they rest on, and the explanation appears on those events. One model runtime runs at a time. | Advisory only. It does not yet choose which protections apply. The model is a 2.7 GB download on first use, and is not downloaded unless the disk has room for it plus 4 GB. It uses about 3 GB of memory while running. Checked with a real model on the development Mac, not yet inside the VM lab; treat it as experimental. |
 
-[docs/layers.md](docs/layers.md) describes each layer, the files that implement it,
-and the reference tools we compare against.
+See [protection layers](docs/layers.md) for implementation details and the
+[roadmap](docs/roadmap.md) for planned work.
 
-## Smart triage
+## Build from source
 
-Strong protection has a cost. Sandboxing everything breaks things, and prompting
-for everything trains people to click Allow. The plan is to apply heavy protection
-only to what is new or suspicious and let the rest run quietly.
+Requires macOS 14 or later, Xcode Command Line Tools, CMake, and Python 3.12.
 
-1. **Deterministic signals decide most cases.** Known-bad is blocked. Long-used,
-   signed software runs normally. Something is "new" when it is first seen on this
-   Mac, recently published, unsigned, just downloaded, written by an agent in this
-   session, or contacting a destination never seen before.
-2. **New things are contained by default.** They run inside the containment layer
-   with a narrow allowlist. This needs no model.
-3. **The model reviews what is left.** It reads the script or package, the chain
-   that led to it (agent, command, script, connection) and what it tried to do.
-   It explains the event in plain language, recommends allow, keep contained or
-   block, and drafts the narrowest exception that would let legitimate work continue.
+```sh
+git clone https://github.com/LIT-Protocol/boxcop.git
+cd boxcop
+python3.12 -m venv .venv
+.venv/bin/python -m pip install -r requirements.txt
+.venv/bin/python desktop/macos/scripts/build_app.py --profile limited-development --output /tmp/boxcop-dev
+```
 
-Today only the explanation and review parts of step 3 exist. Steps 1 and 2 are on
-the [roadmap](docs/roadmap.md).
+The development build is ad-hoc signed and excludes outbound control. That layer
+requires a Developer ID signed app and provisioned network extension.
 
-Rules for the model:
+The install gate requires an explicitly configured signed malware feed. No feed
+is trusted by default; without one it shows "Unavailable". Follow the
+[feed configuration and publisher guide](docs/package-registry-firewall.md).
 
-- **It may tighten protection on its own, never loosen it.** Loosening needs the
-  user. The model reads attacker-controlled text, so a prompt injection must not be
-  able to grant access. In the code, no model output changes a policy, allows an
-  action or lifts a block.
-- **Local by default.** The inference runtime ships in the app and the model runs
-  on this Mac.
-- **Fails safe.** If the model is unavailable, the deterministic layers still apply.
-
-## Install and build
-
-BoxCop has no public download yet, and this repository is not public yet. With
-access to it, build BoxCop on a Mac running macOS 14 or later with Xcode Command Line Tools, CMake and Python 3.12.
-
-**Signed build with every layer.** This needs a Developer ID Application
-certificate, the two provisioning profiles and saved notarization credentials; see
-[docs/releasing.md](docs/releasing.md).
+For a signed, notarized distribution build, configure the certificates and
+provisioning profiles in the [release guide](docs/releasing.md), then run:
 
 ```sh
 ./build.sh
 ```
 
-The result is a new `BoxCop-beta-<timestamp>` folder in `~/Downloads` containing
-`BoxCop.app`, `BoxCop.dmg`, `BoxCop.dSYM` and `build-evidence.json`.
+Read [getting started](docs/getting-started.md) for first launch, protection tests,
+status checks, and removal. Use a dedicated [macOS VM](docs/vm-lab.md) to test
+changes to network extensions, package routing, or agent hooks.
 
-**Limited-development build.** Ad-hoc signed, no certificate needed. It has every
-layer except outbound control, because macOS only loads a network extension from a
-Developer ID signed app.
+## Contributing
 
-```sh
-python3.12 desktop/macos/scripts/build_app.py --profile limited-development --output /tmp/boxcop-dev
-```
-
-`build.sh` configures the install gate's malware feed for you. For a
-limited-development build, set the three `BOXCOP_PACKAGE_FEED_*` variables shown
-in [docs/package-registry-firewall.md](docs/package-registry-firewall.md); without
-them the install gate shows "Unavailable".
-
-**Tests.**
+Contributions are welcome: bug reports, documentation, reproducible protection
+tests, and code improvements all help. See [CONTRIBUTING.md](CONTRIBUTING.md)
+for setup, checks, and pull request guidance. For larger changes, open an issue
+first to discuss scope and the protection boundary.
 
 ```sh
-python3.12 -m venv .venv
-.venv/bin/python -m pip install -r requirements.txt
 .venv/bin/python -m pytest -q tests
 swift test --package-path desktop/macos
 ```
 
-[docs/getting-started.md](docs/getting-started.md) covers first launch, the
-built-in test for each layer, `BoxCop --status` and removal.
+## Repository guide
 
-## Testing in the VM lab
-
-Layers that change system state (the network extension, package manager routing,
-agent hooks) are accepted in a dedicated macOS virtual machine with System
-Integrity Protection enabled, not on a developer's own Mac.
-[docs/vm-lab.md](docs/vm-lab.md) describes the lab and how to reach it.
-
-## Repository layout
-
-| Path | Contents |
+| Directory | Contents |
 | --- | --- |
-| `server/` | The Python engine: registry firewall, install script containment, agent hooks, software inventory and remediation, smart triage. Frozen into the app as `boxcop-engine`. |
-| `desktop/macos/` | The Swift app (`BoxCop`), shared core (`BoxCopCore`), network extension (`BoxCopNetworkFilter`), build scripts and resources. |
-| `tools/` | Command-line tools: malware feed publisher, skill scanner, software inventory. |
-| `tests/` | Python tests for the engine and the build pipeline. Swift tests live in `desktop/macos/Tests`. |
-| `docs/` | One document per layer, plus build, release and lab guides. |
-| `research/aikido/` | Notes on the closest competing product. |
-| `website/` | The product site. |
-| `brand/` | Icon and mark artwork. |
-| `build.sh` | The signed, notarized distribution build. |
-| `LICENSE`, `NOTICE` | The Apache-2.0 license text and the attribution notice. |
-| `update_from_feed.sh` | Daily review of public security feeds; see [docs/security-feed-review.md](docs/security-feed-review.md). |
-
-## Principles
-
-1. **Prevent, don't just detect.**
-2. **Assume unfamiliar code may be malicious**, whether or not it has a known signature.
-3. **Use context.** New, unsigned, agent-written or just-downloaded code deserves
-   tighter limits than software the user has run for years.
-4. **Stay quiet.** Ordinary work should not be interrupted.
-5. **Claim only what is tested.** Show "Protected" only when enforcement is active;
-   otherwise say what is off, needs setup or is unavailable.
-6. **Local first.** No account, and nothing uploaded by default.
-
-## Relationship to Allay
-
-BoxCop was ported from [allayhq/Allay](https://github.com/allayhq/Allay) at commit
-`2e2552da`. It keeps the six machine-protection layers. Allay's monitoring features
-(screen and clipboard collection, the paste guard, the browser extension), its
-review reminders and its team features were not carried over.
-
-Three things still carry the old names, on purpose:
-
-- **Bundle identifiers.** The app is `local.sentinel.endpoint` and the network
-  extension is `local.sentinel.endpoint.network-filter`. The Developer ID
-  provisioning profiles we hold are bound to these identifiers. New identifiers
-  need new profiles from Apple, so they stay until those exist.
-- **The package malware feed.** BoxCop reads the existing signed feed at
-  `https://getallay.ai/package-feed/v1/policy.json` (payload schema
-  `allay.package-policy.v1`) until it hosts its own.
-- **The lab directory.** Signing profiles and VM access live in `~/.sentinel-lab`
-  on the development Mac.
-
-## Competition
-
-Aikido's Device Protection is the closest product. It gates packages, IDE and
-browser extensions and agent skills, with central management, and is sold to
-security teams. Our notes from installing and testing it are in
-[research/aikido/README.md](research/aikido/README.md).
+| `server/` | Python protection engine and local triage |
+| `desktop/macos/` | Swift app, network extension, build scripts, and Swift tests |
+| `tools/` | Feed publisher, skill scanner, and inventory tools |
+| `tests/` | Python tests and VM acceptance tools |
+| `docs/` | Protection, setup, build, and release guides |
+| `website/` | Product website |
+| `brand/` | Icons and artwork |
 
 ## License
 
-BoxCop is licensed under the Apache License, Version 2.0. The text is in
-[LICENSE](LICENSE) and attribution is in [NOTICE](NOTICE).
+BoxCop code is licensed under [Apache-2.0](LICENSE). See [NOTICE](NOTICE)
+for attribution and third-party components.
 
 Bundled data and software keep their own licenses. In particular, the threat
 domain list used by outbound control is the HaGeZi Threat Intelligence Feeds list,
@@ -182,6 +89,3 @@ licensed under GPL-3.0. It ships as a separate data file with its own license an
 notice in `desktop/macos/Resources/ThreatDomains/`, and is not part of the
 Apache-2.0 licensed code. The package malware intelligence, Sparkle, llama.cpp and
 the local model each carry their own license, listed in [NOTICE](NOTICE).
-
-The GitHub repository is still private. The license is in place; the remaining
-steps before the repository is opened are on the [roadmap](docs/roadmap.md).

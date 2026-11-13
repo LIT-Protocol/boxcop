@@ -90,8 +90,9 @@ the same user, not tamper-proof records.
 - The engine has a three-second deadline per callback. The native launcher waits
   at most 3.5 seconds and denies if the engine is missing, crashes, hangs or
   answers with something malformed.
-- Database lock waits are limited to 200 ms so a busy audit store cannot use up
-  the agent's hook timeout. A parse or audit failure is a denial.
+- Database lock waits are limited to one second to tolerate brief contention
+  between callbacks. The overall three-second callback deadline still applies.
+  A parse or audit failure is a denial.
 - Hook entries ask for a five-second timeout. Cursor entries also set
   `failClosed: true`. Whether an agent honors these is up to the agent.
 - If the app has been deleted, or the operating system cannot start the hook at

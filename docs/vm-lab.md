@@ -231,3 +231,40 @@ What this run does not show:
 - The run used fake credentials, inert packages and a receiver inside the guest. It
   is not a test against live malware.
 
+
+### Second run: version 0.2.0
+
+Recorded later on 2026-11-12 in the same VM with the signed and notarized build of
+commit `e276ac8` (version 0.2.0, build 1794532225), installed over 0.1.0. The report
+is [evidence/vm-acceptance-2026-11-12-v0.2.0.json](evidence/vm-acceptance-2026-11-12-v0.2.0.json):
+33 checks passed, none failed, one was skipped (live Claude Code, as before). This
+run supersedes the first for the behaviour that changed.
+
+| Change since the first run | What was checked | Result |
+| --- | --- | --- |
+| The install gate refuses reported releases as well as confirmed ones | The proxy answers 403 with `BOXCOP_KNOWN_MALWARE` for `node-env-resolver@6.5.1` and with `BOXCOP_REPORTED_MALWARE` for `cache-cleanup-module@2.5.0`, the release the first run saw served. | Pass |
+| A blocked exact version fails with BoxCop's name | `npm install` of each release above fails with npm's E403 and the BoxCop code in its output, and installs nothing. | Pass |
+| One reported release can be allowed | In the app, "Allow this release" on the `cache-cleanup-module 2.5.0` event, after a confirmation, made the proxy serve that version and still refuse 2.6.0. "Remove" under Protections made it refuse 2.5.0 again. Checked by HTTP status only; the package was never installed. | Pass, by hand |
+| No approval step | A `gog gmail send` through each hook is allowed outright. The app has no approval rows, buttons or settings. | Pass |
+| Smart triage checks disk space first | With 2.9 GB free, turning it on downloaded nothing and started no runtime. The card says how much space is needed and available. | Pass, by hand |
+
+![A reported release, with the exception button](images/vm-reported-block.png)
+
+![The disk guard in the guest](images/vm-triage-disk-guard.png)
+
+Smart triage with a real model was checked on the development Mac, not in the VM,
+because the guest's disk is too small for the model. Using the engine code and the
+runtime from this build in a temporary folder:
+
+- The model downloaded and loaded, and one `llama-server` process ran, using about
+  3.6 GB of memory.
+- A second attempt to start the model while it ran was refused with "Another copy of
+  BoxCop is already running the triage model."
+- Given three engine events (a blocked remote script, a reported package, a
+  contained install script's connection), the model returned three findings, each
+  citing the right event by its `engine:` id.
+- Closing stopped the runtime, and removing the model freed 2.74 GB.
+
+Still not shown: the app displaying a model explanation on an event with a real
+model (the mapping is unit-tested only), smart triage running inside the 8 GB guest,
+and Claude Code or Codex driven live.

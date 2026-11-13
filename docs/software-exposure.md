@@ -183,3 +183,44 @@ python -m pytest -q tests/test_software_inventory.py tests/test_feed_advisories.
 The tests build fixture installation layouts in temporary directories. They cover
 affected, fixed, unknown and benign versions, traversal limits, symlink rejection
 and incomplete scans. They do not scan the developer's Mac.
+
+## Findings for coding agents
+
+Inspired by [NoVul's project-scoped agent workflow](https://github.com/misbahsy/novul),
+the inventory CLI can emit actionable findings and a grouped fix plan, or a
+ready-to-use repair prompt:
+
+```sh
+python3 tools/supply_inventory.py --root "$PWD" --format findings
+python3 tools/supply_inventory.py --root "$PWD" --format agent
+```
+
+Both commands perform a fresh, offline scan. Omit `--root` to check the default
+machine locations. The engine accepts the same options after
+`--software-inventory`. The default `--format inventory` remains unchanged.
+The findings JSON uses schema `boxcop.software-findings.v1`, excludes advisories
+already fixed or inapplicable to the architecture, and retains unresolved findings,
+timestamps, coverage gaps and absent roots. Its `fix_plan` groups installations
+using the existing remediation planner; it does not execute updates or promise
+that an update is available. The agent prompt treats the evidence as untrusted
+data and calls for approval before changes, tests and a rescan afterward.
+
+This adds no online vulnerability lookup, lockfile scanner, secret scanner or
+severity ranking. Project scans still cover only supported installed metadata and
+reviewed advisories. Output includes local software paths: review it before
+sharing it with an external agent. With `--cache`, the saved app report remains
+the full inventory regardless of output format.
+
+In an installed build, use the same interface without a Python checkout:
+
+```sh
+/Applications/BoxCop.app/Contents/MacOS/BoxCop --software-inventory --root "$PWD" --format findings
+/Applications/BoxCop.app/Contents/MacOS/BoxCop --software-inventory --format agent
+```
+
+Health also offers **Copy all steps for my agent** for the current report, including
+both automatic and manual repair groups. Unlike the CLI's fresh scan, this copies
+the displayed report with its original timestamp. It excludes ignored advisories
+and is disabled while a scan or repair is running. Per-group copying remains
+available and also respects ignored advisories. Clipboard export sends nothing
+automatically.

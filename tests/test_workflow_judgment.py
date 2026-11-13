@@ -4,8 +4,8 @@ import time
 import unittest
 from threading import Event
 from unittest.mock import patch
-from test_workflow_context import fixture
-from server.workflow_judgment import WorkflowJudge, LocalWorkflowModel, compact, validate_result, strict_json
+from test_workflow_context import engine_event, fixture
+from server.workflow_judgment import PROMPT_VERSION, SYSTEM, WorkflowJudge, LocalWorkflowModel, compact, validate_result, strict_json
 
 
 def response(packet, risk='needs_review'):
@@ -36,6 +36,45 @@ class JudgmentTests(unittest.TestCase):
         self.assertGreater(packet['omittedEvents'], 0)
         self.assertIn('ScreenCaptureKit.window', {e['collector'] for e in packet['events']})
         self.assertEqual(len(aliases), len(packet['events']))
+
+    def test_engine_security_event_reaches_the_model_and_a_finding_cites_its_row(self):
+        context = fixture(1)
+        record = engine_event(context, agent=None)
+        packet, aliases = compact(context)
+        shown = packet['events'][1]
+        self.assertEqual((shown['kind'], shown['collector'], shown['ref']), ('security_event', 'BoxCopEngine', 'e1'))
+        self.assertEqual({name: field['value'] for name, field in shown['fields'].items()}, {
+            'layer': 'install_gate', 'outcome': 'blocked', 'title': 'Blocked install of left-pad 1.0.1 (reported as malware)',
+            'reason': 'This release is reported as malware by github, but the report is not yet confirmed.', 'subject': 'left-pad@1.0.1'})
+        self.assertNotIn('engine:', json.dumps(packet))  # The model sees aliases, never row ids.
+        self.assertEqual(aliases['e1'], record['id'])
+        result = validate_result({'intent': 'Install a dependency', 'risk': 'needs_review', 'uncertainties': [], 'findings': [
+            {'summary': 'An instruction asked for a release that BoxCop then blocked.', 'recommendation': 'Check where the instruction came from.',
+             'evidence': ['e0', 'e1']}]}, aliases)
+        self.assertEqual(result['findings'][0]['eventIDs'], [context['events'][0]['id'], 'engine:3f2a9c0d1b7e4a55'])
+        # The prompt says what the record is and how to cite it.
+        self.assertEqual(PROMPT_VERSION, 'workflow-judgment-v7')
+        for phrase in ('security_event', 'layer', 'outcome', 'title', 'reason', 'subject', 'agent', 'cite'):
+            self.assertIn(phrase, SYSTEM)
+        judge = WorkflowJudge(lambda packet: {'intent': 'x', 'risk': 'needs_review', 'uncertainties': [], 'findings': [
+            {'summary': 's', 'recommendation': 'r', 'evidence': ['e1']}]}, interval=0)
+        self.addCleanup(judge.close)
+        judge.submit(context)
+        wait_for(lambda: judge.status()['state'] == 'ready')
+        status = judge.status()
+        self.assertEqual(status['promptVersion'], 'workflow-judgment-v7')
+        self.assertEqual(status['result']['findings'][0]['eventIDs'], ['engine:3f2a9c0d1b7e4a55'])
+        self.assertIn('engine:3f2a9c0d1b7e4a55', status['result']['evidenceEventIDs'])
+
+    def test_engine_security_events_are_the_last_evidence_dropped_for_space(self):
+        context = fixture(30)
+        for event in context['events']:
+            event['fields']['instruction']['value'] = '界' * 4096
+        for index in range(3):
+            engine_event(context, identifier=f'row{index}')
+        packet, aliases = compact(context)
+        self.assertGreater(packet['omittedEvents'], 0)
+        self.assertEqual(sorted(v for v in aliases.values() if v.startswith('engine:')), ['engine:row0', 'engine:row1', 'engine:row2'])
 
     def test_citations_are_bound_to_the_actual_model_input(self):
         packet, aliases = compact(fixture())

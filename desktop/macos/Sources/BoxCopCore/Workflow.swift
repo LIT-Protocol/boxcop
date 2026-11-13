@@ -15,7 +15,8 @@ public struct WorkflowField: Codable, Equatable, Sendable {
 
 /// Evidence, separate from policy decisions. Per-field provenance survives export.
 public struct WorkflowEvent: Codable, Identifiable, Equatable, Sendable {
-    public let id: UUID
+    /// A UUID string, or `engine:<event id>` for a protection decision reported by the engine.
+    public let id: String
     public let sessionID: UUID
     public let sequence: Int
     public let observedAt: Date
@@ -29,7 +30,7 @@ public struct WorkflowEvent: Codable, Identifiable, Equatable, Sendable {
     public let windowTitle: String?
     public let availability: String
     public let fields: [String: WorkflowField]
-    public let relatedEventIDs: [UUID]
+    public let relatedEventIDs: [String]
 }
 
 public struct WorkflowTimeline: Sendable {
@@ -41,11 +42,12 @@ public struct WorkflowTimeline: Sendable {
     public let capacity: Int
     public init(capacity: Int = 2000) { self.capacity = max(1, capacity) }
     public mutating func clear() { events = []; dropped = 0; sequence = 0; sessionID = UUID() }
-    @discardableResult public mutating func append(kind: String, collector: String, bundleID: String? = nil, pid: Int32? = nil,
+    /// `id` is given only for observations that already have a stable identity; everything else gets a new UUID.
+    @discardableResult public mutating func append(id: String? = nil, kind: String, collector: String, bundleID: String? = nil, pid: Int32? = nil,
                                 windowTitle: String? = nil, availability: String = "available", at: Date = Date(),
                                 phase: String = "observed", provenance: String = "observed",
-                                fields: [String: WorkflowField] = [:], relatedEventIDs: [UUID] = [], receivedAt: Date? = nil) -> UUID {
-        let id = UUID()
+                                fields: [String: WorkflowField] = [:], relatedEventIDs: [String] = [], receivedAt: Date? = nil) -> String {
+        let id = id ?? UUID().uuidString
         sequence += 1
         events.append(WorkflowEvent(id: id, sessionID: sessionID, sequence: sequence, observedAt: at, receivedAt: receivedAt ?? Date(),
                                     kind: kind, phase: phase, collector: collector, provenance: provenance,

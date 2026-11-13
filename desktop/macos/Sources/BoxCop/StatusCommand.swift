@@ -31,7 +31,8 @@ enum StatusCommand {
             LayerRules.agentChecks(engineAvailable: engine, wanted: wants(.agentChecks), agents: hooks?.connections.map { ($0.id, $0.health) }),
             LayerRules.machineHealth(engineAvailable: engine, wanted: wants(.machineHealth),
                                      hasReport: FileManager.default.fileExists(atPath: SoftwareInventory.cacheURL.path)),
-            LayerRules.smartTriage(engineAvailable: engine, runtimeAvailable: EngineTools.inferenceAvailable, wanted: wants(.smartTriage), live: false)
+            LayerRules.smartTriage(engineAvailable: engine, runtimeAvailable: EngineTools.inferenceAvailable, wanted: wants(.smartTriage),
+                                   modelDownloaded: EngineTools.downloadedModelBytes() != nil, live: false)
         ]
         return ProtectionSummary(layers: layers, paused: defaults.bool(forKey: "boxcop.paused"))
     }

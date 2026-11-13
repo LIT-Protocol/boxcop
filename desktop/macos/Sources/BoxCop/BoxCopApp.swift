@@ -39,7 +39,6 @@ import BoxCopCore
         }
         if arguments.contains("--release-profile") { print(profile.rawValue); return }
         if first == "--status" { StatusCommand.run(arguments: arguments) }
-        if arguments == [arguments[0], "--review-agent-action"] { AgentActionReview.run() }
         if let first, ["--host-agent-hook", "--host-agent-integrations"].contains(first) { HostAgents.run(Array(arguments.dropFirst())) }
         else if arguments.contains("--dev-software-inventory") { SoftwareInventory.run() }
         else if arguments.contains("--dev-network-filter-enable") { NetworkFilterControl.run(enable: true) }
@@ -148,16 +147,14 @@ struct BoxCopApp: App {
 struct MenuState: Equatable {
     var overall: OverallStatus
     var attention: Bool
-    var approvals: Int
     @MainActor init(_ model: AppModel) {
-        overall = model.summary.overall; attention = model.attentionNeeded; approvals = model.pendingApprovalCount
+        overall = model.summary.overall; attention = model.attentionNeeded
     }
     var statusLine: String { "BoxCop: " + overall.word }
-    var approvalsLine: String? { approvals > 0 ? "\(approvals) approval\(approvals == 1 ? "" : "s") waiting" : nil }
     var pauseLine: String { overall == .paused ? "Resume Protection" : "Pause Protection" }
     /// The dot appears only when something needs the person.
     var dot: NSColor? {
-        if approvals > 0 || attention { return Palette.nsColor(Palette.amberHex) }
+        if attention { return Palette.nsColor(Palette.amberHex) }
         return overall == .notProtected ? Palette.nsColor(Palette.redHex) : nil
     }
 }
@@ -214,9 +211,6 @@ private struct MenuContent: View {
         Text(state.statusLine)
         Divider()
         Button("Open BoxCop") { model.showWindow() }
-        if let approvals = state.approvalsLine {
-            Button(approvals) { model.eventFilter = EventFilter(kind: .held); model.showWindow(page: .events) }
-        }
         Button(state.pauseLine) { if model.paused { model.resume() } else { model.pause() } }
         if updater.enabled, let version = updater.availableVersion {
             Button("Update to \(version)…") { updater.checkForUpdates() }

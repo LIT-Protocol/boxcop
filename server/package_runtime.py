@@ -9,7 +9,8 @@ from .local_package_policy import state_directory
 from .event_log import EventLog, private_directory
 from .package_channel import bundled_channel, bootstrap
 from .package_intelligence import PolicyStore
-from .package_proxy import Firewall, RegistryServer, refresh
+from .package_exceptions import Exceptions, release
+from .package_proxy import Firewall, RegistryServer, refresh, self_test
 from .security_events import FIREWALL_LOG
 
 
@@ -28,8 +29,9 @@ class PackageRuntime:
         self.closed = threading.Event()
         self.worker = None
         self.initialized = False
+        self.exceptions = Exceptions(self.directory)
 
-    def status(self):
+    def status(self, exception_error=None):
         with self.lock:
             try:
                 route = routing.status(self.home)
@@ -45,9 +47,37 @@ class PackageRuntime:
                 message = 'Package routing is enabled, but BoxCop protection needs to be started'
             return dict(configured=self.channel is not None, routed=routed, active=available and configured,
                 busy=self.busy, summary=message, stale=policy.get('stale', True),
-                generated_at=policy.get('generated_at'), update_error=policy.get('update_error'))
+                generated_at=policy.get('generated_at'), update_error=policy.get('update_error'),
+                exceptions=self.exceptions.read(), exception_error=exception_error)
 
-    def command(self, operation):
+    def _exception(self, operation, ecosystem, package, version):
+        """Allow or stop allowing one exact release. Returns a message when refused."""
+        try:
+            if operation == 'allow':
+                if self_test(ecosystem, package):
+                    return 'The BoxCop test package cannot be allowed.'
+                policy = self.store.policy if self.store else None
+                if policy is None:
+                    return 'Turn on the install gate before allowing a release.'
+                # Checked against the verified list here, and again by the firewall on every request.
+                decision = policy.assess(ecosystem, package, version)['decision']
+                if decision == 'block':
+                    return 'Confirmed malware cannot be allowed.'
+                if decision != 'review':
+                    release(ecosystem, package, version)  # ValueError if malformed.
+                    return 'This release is not on the malware list, so there is nothing to allow.'
+            self.exceptions.change(operation, ecosystem, package, version)
+        except OverflowError:
+            return 'Too many allowed releases. Remove one first.'
+        except (ValueError, TypeError):
+            return 'That is not a valid package release.'
+        except OSError:
+            return 'The allowed-release list could not be saved.'
+        return None
+
+    def command(self, operation, ecosystem=None, package=None, version=None):
+        if operation in ('allow', 'revoke'):
+            return self.status(self._exception(operation, ecosystem, package, version))
         with self.lock:
             if operation == 'status' and not self.initialized:
                 self.initialized = True
@@ -109,7 +139,7 @@ class PackageRuntime:
         secret = key_path.read_bytes()
         if len(secret) != 32:
             raise ValueError('Invalid package artifact key')
-        server = RegistryServer(Firewall(store, secret, log=EventLog(self.directory / FIREWALL_LOG)), self.port)
+        server = RegistryServer(Firewall(store, secret, log=EventLog(self.directory / FIREWALL_LOG), exceptions=self.exceptions), self.port)
         with self.lock:
             if self.closed.is_set():
                 server.server_close()

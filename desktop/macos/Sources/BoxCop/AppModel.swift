@@ -26,7 +26,7 @@ struct Capabilities {
 
 /// One thing on Overview that is waiting for the person.
 struct NeedsYouItem: Identifiable {
-    enum Action { case reviewApproval(String), openNetworkSettings, repairHooks, openHealth, restartEngine, fix(LayerID) }
+    enum Action { case openNetworkSettings, repairHooks, openHealth, restartEngine, fix(LayerID) }
     let id: String
     let icon: String
     let text: String
@@ -71,16 +71,9 @@ struct NeedsYouItem: Identifiable {
     @Published var agentsLoaded = false
     @Published var busyLayers = Set<LayerID>()
     @Published var layerMessages: [LayerID: String] = [:]
+    /// The release the install gate's message is about, so the message shows next to that release's events.
+    @Published var releaseChanged: PackageRelease?
     let network = NetworkConnectionsModel()
-    let approvals = AgentApprovalWatcher()
-
-    // Approval inbox
-    @Published var reviewPolicies = ReviewPolicies()
-    @Published var reviewRequests: [ReviewRequest] = []
-    @Published var reviewSummaries: [String: ReviewSummary] = [:]
-    @Published var reviewLoaded = false
-    @Published var reviewError: String?
-    @Published var reviewBusy = false
 
     // Machine health
     @Published var inventory: SoftwareInventoryReport?
@@ -100,6 +93,10 @@ struct NeedsYouItem: Identifiable {
     @Published var judgment: WorkflowJudgmentStatus?
     @Published var triageMessage = ""
     @Published var explanations: [String: String] = [:]
+    /// Size of the downloaded model on disk, or nil when there is none.
+    @Published var modelBytes: Int64?
+    @Published var modelBusy = false
+    @Published var modelMessage = ""
 
     // Settings
     @Published var notificationsEnabled: Bool
@@ -127,7 +124,8 @@ struct NeedsYouItem: Identifiable {
     private let settingsHelper = SystemSettingsHelper()
     private let reviewer = WorkflowReviewClient()
     private var timeline = WorkflowTimeline(capacity: 1000)
-    private var timelineIDs: [UUID: String] = [:]
+    /// Timeline observation id to Events row id, for findings that cite an observation.
+    private var timelineIDs: [String: String] = [:]
     private var timelineSeen = Set<String>()
     private var networkImporter = NetworkWorkflowImporter()
     private var journal: WorkflowJournal?
@@ -142,9 +140,8 @@ struct NeedsYouItem: Identifiable {
         notificationsEnabled = defaults.object(forKey: "boxcop.notifications") as? Bool ?? true
         ignoredFindings = IgnoredSoftwareFindings.load(from: defaults)
         findingFirstSeen = (defaults.dictionary(forKey: "boxcop.inventory.firstSeen") as? [String: Double] ?? [:]).mapValues(Date.init(timeIntervalSince1970:))
-        // Republish layer 3 and approval changes so views that read the model redraw.
+        // Republish layer 3 changes so views that read the model redraw.
         network.objectWillChange.sink { [weak self] _ in self?.objectWillChange.send() }.store(in: &observers)
-        approvals.objectWillChange.sink { [weak self] _ in self?.objectWillChange.send() }.store(in: &observers)
     }
 
     nonisolated static func key(_ layer: LayerID) -> String { "boxcop.layer." + layer.rawValue }
@@ -185,7 +182,8 @@ struct NeedsYouItem: Identifiable {
             agentLayer,
             LayerRules.machineHealth(engineAvailable: capabilities.engine, wanted: wants(.machineHealth), hasReport: inventory != nil, findings: activeFindings.count),
             LayerRules.smartTriage(engineAvailable: capabilities.engine, runtimeAvailable: capabilities.triageRuntime, wanted: triageEnabled,
-                                   setupState: setup?.state ?? (judgment == nil ? nil : "ready"), fraction: setup?.fraction ?? 0)
+                                   setupState: setup?.state ?? (judgment == nil ? nil : "ready"), fraction: setup?.fraction ?? 0,
+                                   setupMessage: setup?.message, modelDownloaded: modelBytes.map { _ in true })
         ]
         guard paused else { return all }
         // Pausing unroutes installs and scripts and stops threat blocking. Agent hooks stay connected.
@@ -203,16 +201,6 @@ struct NeedsYouItem: Identifiable {
 
     // MARK: Events
 
-    var approvalItems: [ApprovalItem] {
-        var items = reviewRequests.map(\.item)
-        let known = Set(items.map(\.id))
-        // The watcher sees a new request before the inbox has been read.
-        for pending in approvals.pending where !known.contains(pending.id) {
-            items.append(ApprovalItem(id: pending.id, application: pending.application, reasons: pending.reasons, command: "",
-                                      status: "pending", created: Date(timeIntervalSince1970: pending.expires - 600), expires: Date(timeIntervalSince1970: pending.expires)))
-        }
-        return items
-    }
     var findingItems: [FindingItem] {
         let checked = inventoryCheckedAt ?? Date()
         return activeFindings.map { item in
@@ -224,20 +212,13 @@ struct NeedsYouItem: Identifiable {
         }
     }
     var events: [FeedEvent] {
-        var notes = explanations
-        for (id, summary) in reviewSummaries { if let text = summary.summary, !text.isEmpty { notes["approval:" + id] = text } }
-        return EventFeed.merge(security: securityEvents, network: network.snapshot?.events ?? [], approvals: approvalItems,
-                               findings: wants(.machineHealth) ? findingItems : [], explanations: triageEnabled ? notes : [:])
+        EventFeed.merge(security: securityEvents, network: network.snapshot?.events ?? [],
+                        findings: wants(.machineHealth) ? findingItems : [], explanations: triageEnabled ? explanations : [:])
     }
-    var pendingApprovalCount: Int { events.filter(\.pinned).count }
-    var attentionNeeded: Bool { pendingApprovalCount > 0 || layers.contains { $0.state == .needsSetup } }
+    var attentionNeeded: Bool { layers.contains { $0.state == .needsSetup } }
 
     var needsYou: [NeedsYouItem] {
         var items: [NeedsYouItem] = []
-        for event in events where event.pinned {
-            let command = event.subject.isEmpty ? "" : ": " + event.subject
-            items.append(.init(id: event.id, icon: "hand.raised.fill", text: "\(event.source) is waiting for your approval\(command)", button: "Review", action: .reviewApproval(event.id)))
-        }
         if case let .failed(reason) = engineState {
             items.append(.init(id: "engine", icon: "exclamationmark.triangle.fill", text: "BoxCop's engine stopped. \(reason)", button: "Restart", action: .restartEngine))
         }
@@ -261,7 +242,6 @@ struct NeedsYouItem: Identifiable {
     }
     func perform(_ action: NeedsYouItem.Action) {
         switch action {
-        case let .reviewApproval(id): showEvent(id)
         case .openNetworkSettings: network.provisioning.openApprovalSettings()
         case .repairHooks: changeHooks(.install)
         case .openHealth: page = .health
@@ -280,18 +260,10 @@ struct NeedsYouItem: Identifiable {
         guard !preview else { return }
         onboardingPresented = !setupComplete
         refreshLogin()
-        approvals.onNew = { [weak self] in self?.notifyApproval($0) }
-        approvals.onGone = { ids in
-            let identifiers = ids.map(AgentApprovalCopy.notificationIdentifier)
-            UNUserNotificationCenter.current().removeDeliveredNotifications(withIdentifiers: identifiers)
-        }
-        approvals.onChange = { [weak self] in self?.refreshReview() }
-        approvals.explainEnabled = triageEnabled
-        approvals.start()
         inventory = SoftwareInventory.cached()
+        refreshModel()
         if setupComplete { startEngine() }
         Task { await network.upgradeInstalledExtension() }
-        refreshReview()
         timer = Task { [weak self] in
             while !Task.isCancelled {
                 await self?.tick()
@@ -313,14 +285,17 @@ struct NeedsYouItem: Identifiable {
             updateSettingsHelper()
         }
         if tickCount % 5 == 0, capabilities.engine { await refreshAgents() }
+        if tickCount % 10 == 0 { refreshModel() }
         if tickCount % 100 == 0, setupComplete, wants(.machineHealth) { await refreshInventory() }
         await runTriage()
     }
 
     func stopAndWait() async {
-        timer?.cancel(); approvals.stop(); reviewer.stop(); settingsHelper.stop()
+        timer?.cancel(); settingsHelper.stop()
         epoch &+= 1
         let engine = client; client = nil
+        // The reviewer engine owns the model runtime; quitting waits until both have exited.
+        await reviewer.stopAndWait()
         await engine?.stop()
         await journal?.flush()
     }
@@ -444,8 +419,8 @@ struct NeedsYouItem: Identifiable {
         case .machineHealth:
             if on { Task { await refreshInventory() } }
         case .smartTriage:
-            approvals.explainEnabled = on
-            if !on { reviewer.stop(); judgment = nil; triageMessage = ""; explanations = [:] }
+            modelMessage = ""
+            if !on { stopTriage(); refreshModel() }
         }
     }
     func fixLayer(_ id: LayerID) {
@@ -460,7 +435,7 @@ struct NeedsYouItem: Identifiable {
             else { network.enable() }
         case .agentChecks: setWanted(.agentChecks, true); changeHooks(.install)
         case .machineHealth: Task { await refreshInventory() }
-        case .smartTriage: reviewer.stop(); judgment = nil
+        case .smartTriage: stopTriage()
         }
     }
 
@@ -468,6 +443,8 @@ struct NeedsYouItem: Identifiable {
         guard !paused else { return }
         paused = true; defaults.set(true, forKey: "boxcop.paused")
         packageEnable?.cancel()
+        // Nothing is reviewed while paused, so the model does not stay in memory.
+        stopTriage()
         Task {
             if case let .packageProtection(status)? = await request(.packageProtection(.disable)) { packageStatus = status }
             if case let .scriptProtection(status)? = await request(.scriptProtection(.disable)) { scriptStatus = status }
@@ -488,6 +465,31 @@ struct NeedsYouItem: Identifiable {
                 _ = await NetworkServiceClient.send("network-threat-blocking-on")
                 await network.refresh()
             }
+        }
+    }
+
+    // MARK: Install gate
+
+    /// Lets package managers install one exact release that is reported as malware but not confirmed.
+    func allowRelease(_ release: PackageRelease) {
+        changeRelease(.allow, release, done: "\(release.display) is allowed. Run the install again.")
+    }
+    func revokeRelease(_ exception: PackageException) {
+        changeRelease(.revoke, exception.release, done: "\(exception.release.display) is blocked again.")
+    }
+    private func changeRelease(_ action: PackageProtectionAction, _ release: PackageRelease, done: String) {
+        guard !preview else { return }
+        Task {
+            guard case let .packageProtection(status)? = await request(.packageProtection(action, release: release)) else {
+                releaseChanged = release
+                layerMessages[.installGate] = "The change could not be saved because the engine is not running."
+                return
+            }
+            packageStatus = status
+            releaseChanged = release
+            layerMessages[.installGate] = status.exceptionError ?? done
+            // The event's Allow button follows the engine's `allowable`, so read the events again now.
+            if case let .securityEvents(events)? = await request(.securityEvents(200)) { securityEvents = events }
         }
     }
 
@@ -520,7 +522,7 @@ struct NeedsYouItem: Identifiable {
                           details: { [weak self] in self?.page = .events; self?.eventFilter = EventFilter(kind: .blocked, layer: .containment); self?.showWindow() })
     }
 
-    // MARK: Agent hooks and approvals
+    // MARK: Agent hooks
 
     func refreshAgents() async {
         guard !preview, !busyLayers.contains(.agentChecks) else { return }
@@ -536,37 +538,6 @@ struct NeedsYouItem: Identifiable {
             else { layerMessages[.agentChecks] = "The hooks could not be changed because the engine did not answer." }
         }
     }
-    func refreshReview() { review(["op": "status"]) }
-    func resolve(approvalID: String, approve: Bool) { review(["op": "resolve", "id": approvalID, "approve": approve]) }
-    func savePolicies(_ policies: ReviewPolicies) {
-        if policies.external || policies.spending { requestNotificationsOnce() }
-        reviewPolicies = policies
-        review(["op": "configure", "policies": ["external": policies.external, "destructive": false, "spending": policies.spending,
-                                                 "threshold_cents": policies.threshold_cents, "currency": policies.currency]])
-    }
-    private var reviewQueue: [[String: Any]] = []
-    private func review(_ payload: [String: Any]) {
-        guard !preview, capabilities.engine else { return }
-        if reviewBusy {
-            // A status read is replaceable; an answer or a rule change is not.
-            if payload["op"] as? String != "status" || reviewQueue.isEmpty { reviewQueue.append(payload) }
-            return
-        }
-        reviewBusy = true
-        Task {
-            let result = await ReviewService.request(payload)
-            reviewBusy = false
-            if let result, result.ok, let policies = result.policies, let requests = result.requests {
-                reviewError = nil; reviewLoaded = true
-                reviewPolicies = policies; reviewRequests = requests; reviewSummaries = result.summaries ?? [:]
-            } else if payload["op"] as? String != "status" {
-                reviewError = result?.error ?? "The approval inbox did not answer. Try again."
-            }
-            if payload["op"] as? String == "resolve" { approvals.touch() }
-            if !reviewQueue.isEmpty { review(reviewQueue.removeFirst()) }
-        }
-    }
-
     // MARK: Machine health
 
     var activeFindings: [SoftwareObservation] {
@@ -669,6 +640,35 @@ struct NeedsYouItem: Identifiable {
 
     // MARK: Smart triage
 
+    /// Stops the one process that runs the model and forgets what it said.
+    private func stopTriage() {
+        reviewer.stop(); judgment = nil; triageMessage = ""; explanations = [:]
+    }
+    func refreshModel() {
+        guard !preview else { return }
+        Task {
+            let bytes = await Task.detached(priority: .utility) { EngineTools.downloadedModelBytes() }.value
+            if modelBytes != bytes { modelBytes = bytes }
+        }
+    }
+    /// Offered only while smart triage is off. The engine refuses while a runtime still holds the model.
+    func removeModel() {
+        guard !preview, !triageEnabled, !modelBusy, capabilities.engine else { return }
+        modelBusy = true; modelMessage = "Removing the model."
+        Task {
+            let removal = await reviewer.removeModel()
+            modelBusy = false
+            switch removal {
+            case let removal? where removal.removed:
+                modelMessage = "Removed the downloaded model and freed \(ByteCountFormatter.string(fromByteCount: removal.freedBytes, countStyle: .file))."
+                modelBytes = nil
+            case .some: modelMessage = "The model is still in use by another copy of BoxCop, so nothing was removed. Quit the other copy and try again."
+            case nil: modelMessage = "The model could not be removed because the engine did not answer. Try again."
+            }
+            refreshModel()
+        }
+    }
+
     /// The timeline holds network history and engine security events only.
     private func runTriage() async {
         guard !preview, triageEnabled, capabilities.engine, capabilities.triageRuntime, !paused else { return }
@@ -676,13 +676,9 @@ struct NeedsYouItem: Identifiable {
             journal = created
             timeline.onAppend = { created.append($0) }
         }
-        for event in securityEvents.reversed() where timelineSeen.insert("engine:" + event.id).inserted {
-            let id = timeline.append(kind: "security_event", collector: "engine", at: event.time, phase: "decided", provenance: "reported", fields: [
-                "layer": WorkflowField(event.layer.rawValue), "outcome": WorkflowField(event.outcome.rawValue),
-                "title": WorkflowField(event.title), "reason": WorkflowField(event.reason), "subject": WorkflowField(event.subject),
-                "agent": WorkflowField(event.agent, provenance: "reported"), "command": WorkflowField(event.command, provenance: "reported"),
-                "package": WorkflowField(event.package), "host": WorkflowField(event.host)])
-            timelineIDs[id] = "engine:" + event.id
+        // Engine decisions go in under `engine:<event id>`, the id of their Events row, so a finding that cites one lands on that row.
+        for event in securityEvents.reversed() where timelineSeen.insert(event.id).inserted {
+            if let id = EngineObservation.append(event, to: &timeline) { timelineIDs[id] = id }
         }
         var networkState = "disabled_or_unavailable"
         if network.setupReady {
@@ -693,24 +689,24 @@ struct NeedsYouItem: Identifiable {
                 let before = timeline.events.count
                 networkImporter.ingest(page, into: &timeline)
                 for event in timeline.events.suffix(max(0, timeline.events.count - before)) {
-                    if let id = event.fields["network_event_id"]?.value { timelineIDs[event.id] = "network:" + id }
+                    if let row = EngineObservation.rowID(for: event) { timelineIDs[event.id] = row }
                 }
                 networkState = page.cursorExpired || page.loggingDropped > 0 || page.writeFailures > 0 ? "incomplete" : page.hasMore ? "catching_up" : "active"
                 if !page.hasMore { break }
             }
         }
-        if timelineIDs.count > 4000 { timelineIDs = timelineIDs.filter { id, _ in timeline.events.contains { $0.id == id } } }
+        if timelineIDs.count > 4000 {
+            let live = Set(timeline.events.map(\.id))
+            timelineIDs = timelineIDs.filter { live.contains($0.key) }
+        }
+        if timelineSeen.count > 4000 { timelineSeen.formIntersection(Set(securityEvents.map(\.id))) }
         let sources = [WorkflowSourceState("engine", engineState == .running ? "active" : "unavailable", "Install gate, containment and agent action decisions"),
                        WorkflowSourceState("network", networkState, "New connections recorded by the network extension")]
         reviewer.submit(WorkflowContext.build(from: timeline, sources: sources)) { [weak self] message, judgment in
             guard let self, self.triageEnabled else { return }
             self.triageMessage = message
             self.judgment = judgment
-            var notes: [String: String] = [:]
-            for finding in judgment?.result?.findings ?? [] {
-                for id in finding.eventIDs { if let row = self.timelineIDs[id] { notes[row] = finding.summary + " " + finding.recommendation } }
-            }
-            if judgment?.result != nil { self.explanations = notes }
+            if let result = judgment?.result { self.explanations = EngineObservation.explanations(result.findings, rows: self.timelineIDs) }
         }
     }
 
@@ -734,8 +730,8 @@ struct NeedsYouItem: Identifiable {
             if !granted { notificationMessage = "macOS is not allowing BoxCop notifications. Turn them on in System Settings, under Notifications." }
         }
     }
-    /// One notification per block or hold: what, why in a few words, and a way to the event.
-    private func notify(_ event: FeedEvent, identifier: String? = nil) {
+    /// One notification per block: what, why in a few words, and a way to the event.
+    private func notify(_ event: FeedEvent) {
         guard notificationsEnabled, !preview else { return }
         Task {
             let center = UNUserNotificationCenter.current()
@@ -749,14 +745,12 @@ struct NeedsYouItem: Identifiable {
             content.categoryIdentifier = "boxcop.event"
             content.threadIdentifier = "boxcop-" + event.layer.rawValue
             content.userInfo = ["event": event.id]
-            try? await center.add(UNNotificationRequest(identifier: identifier ?? "boxcop-event-" + event.id, content: content, trigger: nil))
+            try? await center.add(UNNotificationRequest(identifier: "boxcop-event-" + event.id, content: content, trigger: nil))
         }
     }
     private func announceSecurityEvents(_ events: [SecurityEvent]) {
         guard let seen = announcedEvents else { announcedEvents = Set(events.map(\.id)); return }
-        let pending = Set(approvals.pending.map(\.id))
-        // A waiting approval already has its own notification.
-        for event in events.reversed() where !seen.contains(event.id) && (event.outcome == .blocked || event.outcome == .held) && !pending.contains(event.id) {
+        for event in events.reversed() where !seen.contains(event.id) && event.outcome == .blocked {
             notify(FeedEvent(event))
         }
         announcedEvents = seen.union(events.map(\.id))
@@ -773,11 +767,6 @@ struct NeedsYouItem: Identifiable {
             if let row = FeedEvent(network: event), hosts.insert(event.threat?.hostname ?? "").inserted { notify(row) }
         }
         announcedNetworkBlocks = seen.union(blocked.map(\.id.uuidString))
-    }
-    private func notifyApproval(_ request: PendingApproval) {
-        let item = ApprovalItem(id: request.id, application: request.application, reasons: request.reasons, command: "", status: "pending",
-                                created: Date(), expires: Date(timeIntervalSince1970: request.expires))
-        notify(FeedEvent(approval: item, now: Date()), identifier: AgentApprovalCopy.notificationIdentifier(request.id))
     }
     private func notifyFindings(_ report: SoftwareInventoryReport) async {
         // Stable metadata only: check times and ordering must not cause repeat notifications.
@@ -797,7 +786,6 @@ struct NeedsYouItem: Identifiable {
     }
     func openNotification(userInfo: [AnyHashable: Any], identifier: String) {
         if let event = userInfo["event"] as? String { showEvent(event) }
-        else if let id = AgentApprovalCopy.requestID(notificationIdentifier: identifier) { showEvent("approval:" + id) }
         else if let page = (userInfo["page"] as? String).flatMap(Page.init(rawValue:)) { self.page = page; showWindow() }
         else { showWindow() }
     }
@@ -877,7 +865,6 @@ struct NeedsYouItem: Identifiable {
         _ = NSApp.setActivationPolicy(.regular)
         NSApp.activate(ignoringOtherApps: true)
         window?.makeKeyAndOrderFront(nil)
-        refreshReview()
     }
 }
 #endif

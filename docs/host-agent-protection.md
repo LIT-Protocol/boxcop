@@ -47,11 +47,12 @@ $BOXCOP --host-agent-integrations install   # add or repair BoxCop's entries
 $BOXCOP --host-agent-integrations remove    # remove them and stop automatic registration
 ```
 
-## What is held
+## What is denied
 
-The decision is deterministic. An action is allowed or denied; there is no
-warn-and-continue. A denial gives the agent a fixed reason, a reference to the
-audit record and an instruction to revise the action.
+The decision is deterministic. An action is allowed or denied. There is no
+warn-and-continue, and nothing waits for a person to decide. A denial gives the
+agent a fixed reason, a reference to the audit record and an instruction to
+revise the action.
 
 - **Shell commands** (all three agents): recognizable credential access,
   exfiltration, fetch-to-shell and other dangerous command shapes, including
@@ -65,8 +66,6 @@ audit record and an instruction to revise the action.
 - **Skill and instruction files**: see [skill-security.md](skill-security.md).
 - **Known-malicious packages** named in an install command, using the same signed
   list as the [registry firewall](package-registry-firewall.md).
-- **Sends and spending**, when you turn on the approval inbox: see
-  [human-review.md](human-review.md).
 
 ## Health
 

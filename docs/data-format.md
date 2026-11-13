@@ -13,7 +13,6 @@ event format the app shows, and the files BoxCop writes.
 | `--protection-status --data-dir DIR` | One-shot state of package and script routing. |
 | `--host-agent-hook claude\|codex\|cursor` | Evaluates one agent action from standard input and prints the agent's allow or deny response. |
 | `--host-agent-integrations auto\|install\|status\|remove` | Manages BoxCop's entries in agent settings. |
-| `--human-review` | The approval inbox service used by the app. |
 | `--package-setup status\|disable` | Reports or removes package routing without the app. |
 | `--software-inventory [--cache] [--root PATH]` | Scans installed software and prints the inventory. |
 | `--software-remediation prepare\|apply` | Prepares or applies a guided update. |
@@ -24,7 +23,7 @@ event format the app shows, and the files BoxCop writes.
 ```json
 {"ok": true, "schema": "boxcop.self-test.v1", "engine": "rules", "protocol": 1,
  "checks": {"rules": true, "package_feed": true, "registry_firewall": true,
-            "containment": true, "approvals": true, "inventory": true, "triage": true}}
+            "containment": true, "inventory": true, "triage": true}}
 ```
 
 It touches no user data, opens no network connection and loads no model. The
@@ -56,10 +55,10 @@ Response: `{"version": 1, "id": "<same id>", "ok": true, "result": {...}}`, or
 | --- | --- | --- |
 | `status` | none | `ready`, `protocol`, `engine`, `network_listener`, and `package_registry_listener` / `install_script_listener` when those listeners are up |
 | `security_events` | `limit` (1 to 200) | `events`: a list, newest first |
-| `package_protection` | `action`: `status`, `enable`, `disable` | `packageProtection` |
+| `package_protection` | `action`: `status`, `enable`, `disable`, `allow`, `revoke`. For `allow` and `revoke`: `ecosystem` (`npm` or `PyPI`), `package`, `version` | `packageProtection`, which always includes `exceptions` |
 | `script_protection` | `action`: `status`, `enable`, `disable`, `allow`, `revoke`; `package`; `host` | `scriptProtection` |
 | `workflow_context` | `context` | `workflow`: counts and signals for [smart triage](workflow-context.md) |
-| `workflow_clear` | none | `workflowCleared` |
+| `workflow_clear` | optional `remove_model`: `true` | `workflowCleared`. With `remove_model`, the downloaded model files are deleted, only while the model runtime is stopped, and the result reports the bytes freed. |
 | `shutdown` | none | `stopped`; the engine then exits |
 
 Rules:
@@ -72,6 +71,18 @@ Rules:
 - Error messages are fixed text. They never include request content or internal
   error details.
 
+`package_protection` with `allow` adds an exception for one exact release that the
+feed reports as malware but has not confirmed; `revoke` removes it. Confirmed
+malware and the test package are refused. The firewall checks the tier again on
+every request, so an exception stops working if the feed later confirms the
+release. Every `package_protection` reply lists
+the current exceptions:
+
+```json
+"exceptions": [{"ecosystem": "npm", "package": "some-pkg", "version": "1.2.3",
+                "added": "2026-11-12T20:15:03Z"}]
+```
+
 Example:
 
 ```json
@@ -81,7 +92,7 @@ Example:
 
 ## Security events
 
-`security_events` returns one list of what the engine's layers blocked or held.
+`security_events` returns one list of what the engine's layers blocked.
 The app merges it with network extension events and software findings, which it
 reads from their own sources, to build the Events list.
 
@@ -97,19 +108,25 @@ reads from their own sources, to build the Events list.
  "command": null,
  "package": "evil-pkg",
  "host": null,
+ "ecosystem": "npm",
+ "version": "1.2.3",
+ "allowable": false,
  "policy_ids": ["known-malicious-package"]}
 ```
 
 | Field | Values |
 | --- | --- |
 | `layer` | `install_gate`, `containment`, `agent_actions` |
-| `outcome` | `blocked`, `held`, `approved`, `rejected`, `warned` |
+| `outcome` | `blocked`, `warned` |
 | `title` | A short plain sentence |
 | `reason` | One or two plain sentences saying why |
 | `subject` | `package@version`, a host, a path, or a short command summary |
 | `agent` | `claude`, `codex`, `cursor` or null |
-| `command` | A redacted command line, or null. Present only for approval requests, which store the command for review. |
+| `command` | A redacted command line, or null |
 | `package`, `host` | A name, or null |
+| `ecosystem` | `npm`, `PyPI` or null. Set on install gate events. |
+| `version` | The exact version that was refused, or null |
+| `allowable` | `true` only for a block of an exact version in the reported tier that is not already allowed. The app shows **Allow this release** for these. |
 | `policy_ids` | The rules that matched |
 
 Events never contain secrets or file content. The sources are:
@@ -117,7 +134,6 @@ Events never contain secrets or file content. The sources are:
 | Source | Layer | Stored in |
 | --- | --- | --- |
 | Agent hook denials | `agent_actions`, or `install_gate` for skill files and known-malicious packages | the audit database |
-| Approval requests and their outcome | `agent_actions` | `human-review/state.json` |
 | Registry firewall blocks | `install_gate` | `package-protection/blocks.json` |
 | Refused connections from contained scripts and runs | `containment` | `script-protection/blocked-connections.json` |
 
@@ -131,11 +147,9 @@ and owned by the user.
 | Path | Contents | Holds command text or content? |
 | --- | --- | --- |
 | `events.sqlite3` | Decision audit: one row per evaluated agent action with the agent, action kind, hashed session, working directory, matched policies and decision | No. Content is stored as `[not retained]`. |
-| `human-review/state.json` | Approval rules and requests | Yes: the full action arguments, so the person reviews exactly what they approve. Up to 100 active and 100 finished requests. |
-| `human-review/summaries.json` | Model summaries of requests, kept beside them | Model output only |
 | `<agent>-receipt.json`, `<agent>-<action>-receipt.json` | Last hook callback per agent and per action | No |
 | `agent-integrations.json`, `*.config-backup` | What BoxCop added to agent settings, and exact backups of the settings it edited | The backups are copies of your agent settings |
-| `package-protection/` | The verified malware list (`policy.json`), keys for local artifact links, `blocks.json` | Package names and versions |
+| `package-protection/` | The verified malware list (`policy.json`), keys for local artifact links, `blocks.json`, the releases you have allowed (`exceptions.json`, at most 200) | Package names and versions |
 | `script-protection/` | The script wrapper, `exceptions.json`, `blocked-connections.json`, the `~/.npmrc` change receipt | Package names and hostnames |
 | `software-inventory.json` | Latest inventory, schema `boxcop.software-inventory.v2` | Software names, versions and paths |
 | `software-remediation-results.json`, `software-console/` | Outcomes and console output of guided updates | Package manager output, with URL credentials redacted |

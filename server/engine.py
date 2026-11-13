@@ -25,14 +25,13 @@ from .skill_security import findings as skill_findings
 # ssh/scp/git syntax. SSNs and the other labels still count.
 SENSITIVE = frozenset({"secret", "private-key", "ssn", "medical", "hr-sensitive", "restricted-business"})
 # Invisible formatting/control characters can make a command differ from its
-# visible review. Hold uncertainty; do not normalize and execute it.
+# visible text. Stop on uncertainty; do not normalize and execute it.
 AMBIGUOUS_CONTROLS = "​⁠﻿‪‫‬‭‮⁦⁧⁨⁩\x08\x1b\r"
 
 
 class Engine:
-    def __init__(self, store, clock=None, *, classifier=None, action_gate=None):
+    def __init__(self, store, clock=None, *, classifier=None):
         self.store = store
-        self.action_gate = action_gate
         self.clock = clock or (lambda: datetime.now(timezone.utc))
         self.classifier = classifier or ContentClassifier()
         self.workflow_context = WorkflowContextStore()
@@ -63,27 +62,19 @@ class Engine:
                   'block', 98, 'A native file action targets a conventional credential store or contains recognizable sensitive data. Use a redacted fixture or a non-sensitive file.')
         else:
             match('ambiguous-command-text', any(c in event.content for c in AMBIGUOUS_CONTROLS),
-                  'warn', 75, 'The command contains invisible formatting or terminal control characters. Remove them and review the visible command before retrying; no command was executed.')
+                  'warn', 75, 'The command contains invisible formatting or terminal control characters. Remove them and check the visible command before retrying; no command was executed.')
             for finding in command_findings(event.content):
                 match(finding.policy, True, 'warn' if finding.policy in {'unsupported-runtime', 'unresolved-runtime-version'} else 'block', 94, finding.reason)
             match("sensitive-local", sensitive, "warn", 50, "Recognizable sensitive content is included in a command.")
             match("command-sensitive-egress", sensitive and has_network_tool(event.content), "block", 98, "A command combines recognizable sensitive content with a network tool. The command text cannot establish that the content stays local.")
             match("remote-shell", remote_execution(event.content), "block", 99, "A recognizable fetch/decode-to-execution heuristic matched; no command was executed.")
-            match("download-then-exec", download_then_execute(event.content), "warn", 70, "A download-then-execute heuristic matched; review the sequence. No command was executed.")
+            match("download-then-exec", download_then_execute(event.content), "warn", 70, "A download-then-execute heuristic matched; check the sequence. No command was executed.")
             credential_egress = "credential-file-egress" in enabled and credential_file_egress(event.content)
             match("credential-file-egress", credential_egress, "block", 98, "A command names a conventional credential store (for example ~/.aws/credentials, an SSH private key, or .env) together with a network tool. Nothing was read, sent, or executed.")
             match("credential-file-access", not credential_egress and credential_file_reference(event.content, include_dotenv=False), "warn", 65, "A command reads a conventional credential store; confirm this is expected. Nothing was read or executed.")
         strength = {"allow": 0, "warn": 1, "block": 2}
         strongest = max(matches, key=lambda item: (strength[item[1]], item[2])) if matches else None
         action = strongest[1] if strongest else "allow"
-        # The approval inbox runs only after the rules allow. Its decision is
-        # committed to the same audit record.
-        if action == "allow" and self.action_gate is not None:
-            permitted, reason = self.action_gate()
-            if not permitted:
-                strongest = ("human-review-required", "block", 0, reason)
-                matches.append(strongest)
-                action = "block"
         # Metadata is untrusted too; never interpolate original fields into reasons.
         sanitized = event.model_dump()
         # Match the full sanitized content with equivalent whitespace, without
@@ -105,7 +96,7 @@ class Engine:
         sanitized["content"] = NOT_RETAINED
         summary = {
             "allow": "No enabled rule matched; this is not a safety guarantee.",
-            "warn": "Review required by an enabled rule.",
+            "warn": "An enabled rule flags this action.",
             "block": "An enabled rule blocks this action.",
         }[action]
         record = Record(id=str(uuid4()), created_at=created_at, event=EventInput(**sanitized), decision=Decision(

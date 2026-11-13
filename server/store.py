@@ -87,13 +87,13 @@ class Store:
         return json.loads(row[0]) if row else None
 
     def list_events(self, limit=100, offset=0, decision="all"):
-        """Newest first. `decision` is all, allow, warn, block, or held (warn and block)."""
+        """Newest first. `decision` is all, allow, warn, block, or denied (warn and block)."""
         if type(limit) is not int or not 1 <= limit <= 500 or type(offset) is not int or not 0 <= offset <= 1_000_000:
             raise ValueError("Pagination out of bounds")
-        if decision not in {"all", "allow", "warn", "block", "held"}:
+        if decision not in {"all", "allow", "warn", "block", "denied"}:
             raise ValueError("Invalid event filter")
         where, params = "", []
-        if decision == "held":
+        if decision == "denied":
             where = " WHERE decision IN ('warn','block')"
         elif decision != "all":
             where, params = " WHERE decision=?", [decision]

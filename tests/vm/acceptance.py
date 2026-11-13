@@ -6,8 +6,8 @@ Runs on the host. Uses the existing lab access in ~/.sentinel-lab (SSH alias
 password is read from ~/.sentinel-lab/credentials.json only when --sudo is given, is
 passed on stdin, and is never printed or written anywhere.
 
-  python3 tests/vm/acceptance.py install --host 192.168.64.4 --app /path/to/BoxCop.app
-  python3 tests/vm/acceptance.py run --host 192.168.64.4 --sudo --output report.json
+  python3 tests/vm/acceptance.py install --app /path/to/BoxCop.app
+  python3 tests/vm/acceptance.py run --sudo --output report.json
 
 Turning protections on is done in the app itself (see docs/vm-lab.md).
 """
@@ -21,6 +21,15 @@ LAB = Path.home() / '.sentinel-lab'
 GUEST_WORK = 'SentinelLab/boxcop-acceptance'
 GUEST_PY = 'SentinelLab/python-runtime/cpython-3.12.13-macos-aarch64-none/bin/python3.12'
 NODE = 'v22.21.1'
+
+
+def resolve_host(args):
+    """The lab helper finds the acceptance VM by its MAC address; --host overrides it."""
+    if not args.host and (LAB / 'lab').exists():
+        found = subprocess.run([str(LAB / 'lab'), 'ip'], capture_output=True, text=True)
+        if found.returncode:
+            sys.exit(found.stderr.strip() or found.stdout.strip() or 'the lab VM is not reachable')
+        args.host = found.stdout.strip()
 
 
 def ssh(args, command, stdin=None, timeout=900, check=True):
@@ -88,6 +97,8 @@ def run(args):
     flags = f'--layers {args.layers}'
     if args.listed_npm:
         flags += f' --listed-npm {args.listed_npm}'
+    if args.reported_npm:
+        flags += f' --reported-npm {args.reported_npm}'
     if args.live_claude:
         flags += ' --live-claude'
     stdin = None
@@ -112,15 +123,17 @@ def main():
     sub = p.add_subparsers(dest='command', required=True)
     for name in ('install', 'run'):
         s = sub.add_parser(name)
-        s.add_argument('--host', help='guest IP when the sentinel-lab alias HostName is stale')
+        s.add_argument('--host', help='guest IP; by default ~/.sentinel-lab/lab finds it')
     sub.choices['install'].add_argument('--app', required=True)
     r = sub.choices['run']
     r.add_argument('--output')
     r.add_argument('--layers', default='1,2,3,4,5')
-    r.add_argument('--listed-npm', default='', help='a name@version on the malware feed, for a real-feed block check')
+    r.add_argument('--listed-npm', default='', help='a published name@version the feed marks confirmed malware')
+    r.add_argument('--reported-npm', default='', help='a published name@version the feed marks reported, not confirmed')
     r.add_argument('--live-claude', action='store_true', help='also drive a real Claude Code turn in the guest')
     r.add_argument('--sudo', action='store_true', help='allow the scoped test resolver needed for the outbound checks')
     a = p.parse_args()
+    resolve_host(a)
     sys.exit(install(a) if a.command == 'install' else run(a))
 
 

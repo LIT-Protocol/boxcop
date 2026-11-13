@@ -47,9 +47,8 @@ enum Palette {
     static func color(_ status: FeedEvent.Status) -> Color {
         switch status {
         case .blocked: return red
-        case .held: return amber
         case .finding: return accent
-        case .approved, .allowed, .rejected, .warned: return quiet
+        case .warned: return quiet
         }
     }
 }

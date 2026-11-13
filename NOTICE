@@ -1,0 +1,10 @@
+BoxCop
+Copyright 2026 Lit Protocol
+
+This product includes software developed for Allay (allayhq/Allay).
+
+Bundled third-party data and software keep their own licenses:
+- Threat domain list: HaGeZi Threat Intelligence Feeds, GPL-3.0
+  (desktop/macos/Resources/ThreatDomains/LICENSE and NOTICE.txt)
+- Package malware intelligence: see server/assets/package-intelligence
+- Sparkle and llama.cpp: see the licenses shipped with each

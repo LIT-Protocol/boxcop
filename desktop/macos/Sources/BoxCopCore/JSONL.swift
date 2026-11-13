@@ -79,7 +79,8 @@ struct StrictJSON {
             repeat {
                 let key = try string()
                 guard keys.insert(key).inserted, consume(58) else { throw EngineFailure.protocolViolation }
-                try value(depth: depth + 1, integer: ["version", "protocol", "limit"].contains(key))
+                // The envelope's `version` is the protocol number. Deeper, `version` is a package version and may be text.
+                try value(depth: depth + 1, integer: key == "version" ? depth == 0 : ["protocol", "limit"].contains(key))
                 if consume(125) { return }
                 guard consume(44) else { throw EngineFailure.protocolViolation }
             } while true

@@ -91,7 +91,7 @@ def check_status(label):
 
 
 # ---------------------------------------------------------------- layer 1
-def install_gate(listed):
+def install_gate(listed, reported):
     reg = run(['npm', 'config', 'get', 'registry'])
     routed = REGISTRY in reg['out']
     record('install_gate', 'npm-routed-through-boxcop', routed, registry=reg['out'].strip())
@@ -103,25 +103,25 @@ def install_gate(listed):
     record('install_gate', 'test-package-blocked', r['rc'] != 0 and not installed and 'BOXCOP_KNOWN_MALWARE' in (r['out'] + r['err']),
            rc=r['rc'], names_boxcop='BOXCOP_KNOWN_MALWARE' in (r['out'] + r['err']), on_disk=installed, npm_error=r['err'][-600:])
 
-    if listed:
-        name, version = listed.rsplit('@', 1)
+    for tier, release, code in (('confirmed', listed, 'BOXCOP_KNOWN_MALWARE'), ('reported', reported, 'BOXCOP_REPORTED_MALWARE')):
+        if not release:
+            skip('install_gate', f'feed-{tier}-release-blocked', 'no release supplied')
+            continue
+        name, version = release.rsplit('@', 1)
         base = name.split('/')[-1]
         status, body = http_get(f'{REGISTRY}/npm/{name}/-/{base}-{version}.tgz')
-        record('install_gate', 'feed-listed-release-blocked', status == 403 and 'BOXCOP_KNOWN_MALWARE' in body,
-               release=listed, http_status=status, body=body[:300])
-        if status == 403:  # only ask npm for real malware once the gate has shown it refuses it
-            d = fresh('gate-listed')
-            (d / 'package.json').write_text('{"name":"gate-l","version":"1.0.0"}')
-            r = run(['npm', 'install', listed, '--no-audit', '--no-fund', '--ignore-scripts'], cwd=d)
-            on_disk = (d / 'node_modules' / name).exists()
-            log = STATE / 'package-protection/blocks.json'
-            logged = log.exists() and any(row.get('package') == name and row.get('version') == version for row in json.loads(log.read_text()))
-            record('install_gate', 'feed-listed-release-npm-install-fails-and-is-explained',
-                   r['rc'] != 0 and not on_disk and logged,
-                   release=listed, rc=r['rc'], on_disk=on_disk, in_activity_log=logged, npm_error=r['err'][-400:])
-    else:
-        skip('install_gate', 'feed-listed-release-blocked', 'no listed release supplied')
-
+        record('install_gate', f'feed-{tier}-release-blocked', status == 403 and code in body,
+               release=release, http_status=status, body=body[:300])
+        if status != 403:  # only ask npm for real malware once the gate has shown it refuses it
+            continue
+        d = fresh('gate-' + tier)
+        (d / 'package.json').write_text('{"name":"gate-l","version":"1.0.0"}')
+        r = run(['npm', 'install', release, '--no-audit', '--no-fund', '--ignore-scripts'], cwd=d)
+        on_disk = (d / 'node_modules' / name).exists()
+        output = r['out'] + r['err']
+        record('install_gate', f'feed-{tier}-exact-version-fails-and-names-boxcop',
+               r['rc'] != 0 and not on_disk and code in output,
+               release=release, rc=r['rc'], on_disk=on_disk, names_boxcop=code in output, npm_error=r['err'][-500:])
     d = fresh('gate-benign')
     (d / 'package.json').write_text('{"name":"gate-b","version":"1.0.0"}')
     r = run(['npm', 'install', 'is-number@7.0.0', '--no-audit', '--no-fund'], cwd=d)
@@ -342,7 +342,8 @@ def agent_checks(live_claude):
     registered = settings.exists() and '--host-agent-hook claude' in settings.read_text()
     record('agent_checks', 'claude-hook-registered', registered, file=str(settings))
     target = fresh('agent') / 'blocked.txt'
-    cases = [('printf harmless', True), (REMOTE_EXEC, False), (f'cat $HOME/.aws/credentials > {target}', False)]
+    # A plain send is ordinary work: BoxCop has no approval step for it.
+    cases = [('printf harmless', True), ('gog gmail send --to someone@example.com --subject hi --body hi', True), (REMOTE_EXEC, False), (f'cat $HOME/.aws/credentials > {target}', False)]
     for harness in ('claude', 'codex', 'cursor'):
         outcomes, good = [], True
         for command, expect in cases:
@@ -401,6 +402,7 @@ def machine_health():
 def main():
     p = argparse.ArgumentParser()
     p.add_argument('--listed-npm', default='')
+    p.add_argument('--reported-npm', default='')
     p.add_argument('--layers', default='1,2,3,4,5')
     p.add_argument('--live-claude', action='store_true')
     p.add_argument('--sudo-stdin', action='store_true', help='read the guest password from stdin for the scoped test resolver')
@@ -411,7 +413,7 @@ def main():
     version = run(['/usr/bin/defaults', 'read', str(APP / 'Contents/Info'), 'CFBundleShortVersionString'])['out'].strip()
     build = run(['/usr/bin/defaults', 'read', str(APP / 'Contents/Info'), 'CFBundleVersion'])['out'].strip()
     states = check_status('before')
-    steps = [('1', lambda: install_gate(a.listed_npm)), ('2', containment), ('3', lambda: outbound(password)),
+    steps = [('1', lambda: install_gate(a.listed_npm, a.reported_npm)), ('2', containment), ('3', lambda: outbound(password)),
              ('4', lambda: agent_checks(a.live_claude)), ('5', machine_health)]
     for key, step in steps:
         if key in layers:

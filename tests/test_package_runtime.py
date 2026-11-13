@@ -5,7 +5,7 @@ import time
 import httpx
 from cryptography.hazmat.primitives.asymmetric.ed25519 import Ed25519PrivateKey
 
-from server.package_intelligence import build_payload, datadog_records, now, sign
+from server.package_intelligence import build_payload, datadog_records, now, report, sign
 from server.package_runtime import PackageRuntime
 from server.package_routing import status as routing_status
 from tools.package_service import provision
@@ -17,8 +17,9 @@ def fixture(tmp_path, monkeypatch, *, refresh=None):
     channel = dict(schema='boxcop.package-channel.v1', url='https://feed.invalid/policy',
                    public_key=base64.b64encode(public).decode(), minimum_sequence=1)
     directory = tmp_path / 'state'
-    provision(directory, sign(build_payload(list(datadog_records({'bad-fixture': ['1.0.0']}, 'npm')), 1,
-                                          {'fixture': {'fetched_at': now()}}), key), public)
+    rows = list(datadog_records({'bad-fixture': ['1.0.0']}, 'npm'))
+    rows.append(report('github', 'GHSA-reported', 'npm', 'maybe-bad', [{'kind': 'exact', 'versions': ['2.0.0']}], disposition='review'))
+    provision(directory, sign(build_payload(rows, 1, {'fixture': {'fetched_at': now()}}), key), public)
     monkeypatch.setattr('server.package_runtime.refresh', refresh or (lambda *_: None))
     return PackageRuntime(home=tmp_path, directory=directory, channel=channel, port=0)
 
@@ -146,3 +147,60 @@ def test_similar_names_are_not_the_test_package(tmp_path, monkeypatch):
     assert self_test('npm', 'boxcop-test-malware') and self_test('PyPI', 'Boxcop.Test_Malware')
     for name in ('boxcop-test-malware2', '@scope/boxcop-test-malware', 'boxcop-test', '../boxcop-test-malware'):
         assert not self_test('npm', name)
+
+
+def test_allow_and_revoke_one_reported_release_take_effect_at_once(tmp_path, monkeypatch):
+    from server.security_events import firewall_events
+    runtime = fixture(tmp_path, monkeypatch)
+    try:
+        # Before the install gate is on there is no verified list to check against.
+        early = runtime.command('allow', 'npm', 'maybe-bad', '2.0.0')
+        assert early['exceptions'] == [] and early['exception_error'] == 'Turn on the install gate before allowing a release.'
+        runtime.command('enable')
+        status = idle(runtime)
+        assert status['active'] and status['exceptions'] == [] and status['exception_error'] is None
+        base = f'http://127.0.0.1:{runtime.server.server_port}'
+        with httpx.Client(trust_env=False) as client:
+            refused = client.get(base + '/npm/maybe-bad/2.0.0')
+            assert refused.status_code == 403 and refused.json()['error'] == 'BOXCOP_REPORTED_MALWARE'
+            row, = firewall_events(runtime.directory, 10)
+            assert row['allowable'] and (row['ecosystem'], row['package'], row['version']) == ('npm', 'maybe-bad', '2.0.0')
+            for arguments, message in [
+                    (('npm', 'bad-fixture', '1.0.0'), 'Confirmed malware cannot be allowed.'),
+                    (('npm', 'boxcop-test-malware', '1.0.0'), 'The BoxCop test package cannot be allowed.'),
+                    (('PyPI', 'BoxCop_Test.Malware', '1.0.0'), 'The BoxCop test package cannot be allowed.'),
+                    (('npm', 'unlisted', '1.0.0'), 'This release is not on the malware list, so there is nothing to allow.'),
+                    (('npm', 'maybe-bad', '2.0.1'), 'This release is not on the malware list, so there is nothing to allow.'),
+                    (('PyPI', 'maybe-bad', '2.0.0'), 'This release is not on the malware list, so there is nothing to allow.'),
+                    (('npm', '../escape', '1.0.0'), 'That is not a valid package release.'),
+                    (('gem', 'maybe-bad', '2.0.0'), 'That is not a valid package release.'),
+                    (('npm', 'maybe-bad', None), 'That is not a valid package release.')]:
+                reply = runtime.command('allow', *arguments)
+                assert reply['exception_error'] == message and reply['exceptions'] == [], arguments
+            assert not (runtime.directory / 'exceptions.json').exists()
+            allowed = runtime.command('allow', 'npm', 'maybe-bad', '2.0.0')
+            assert allowed['exception_error'] is None and allowed['active']
+            entry, = allowed['exceptions']
+            assert set(entry) == {'ecosystem', 'package', 'version', 'added'}
+            assert (entry['ecosystem'], entry['package'], entry['version']) == ('npm', 'maybe-bad', '2.0.0')
+            assert runtime.command('allow', 'npm', 'maybe-bad', '2.0.0')['exceptions'] == [entry]  # Again: no duplicate.
+            assert runtime.command('status')['exceptions'] == [entry] and runtime.command('status')['exception_error'] is None
+            assert (runtime.directory / 'exceptions.json').stat().st_mode & 0o777 == 0o600
+            # No restart: the next request for it is no longer refused by BoxCop, and the row stops offering it.
+            assert runtime.server.firewall.verdict('npm', 'maybe-bad', '2.0.0')['refused'] is None
+            assert firewall_events(runtime.directory, 10)[0]['allowable'] is False
+            # Confirmed malware stays refused whatever the file says.
+            assert client.get(base + '/npm/bad-fixture/1.0.0').status_code == 403
+            revoked = runtime.command('revoke', 'npm', 'maybe-bad', '2.0.0')
+            assert revoked['exceptions'] == [] and revoked['exception_error'] is None
+            assert runtime.command('revoke', 'npm', 'maybe-bad', '2.0.0')['exception_error'] is None  # Already gone.
+            assert client.get(base + '/npm/maybe-bad/2.0.0').status_code == 403
+        # An exception survives a restart of the engine.
+        runtime.command('allow', 'npm', 'maybe-bad', '2.0.0')
+    finally:
+        runtime.close()
+    restarted = PackageRuntime(home=tmp_path, directory=runtime.directory, channel=runtime.channel, port=0)
+    try:
+        assert [row['package'] for row in restarted.status()['exceptions']] == ['maybe-bad']
+    finally:
+        restarted.close()

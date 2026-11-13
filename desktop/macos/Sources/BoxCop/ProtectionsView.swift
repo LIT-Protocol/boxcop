@@ -79,14 +79,43 @@ private struct Fact: View {
 private struct InstallGateDetails: View {
     @ObservedObject var model: AppModel
     var body: some View {
-        if let status = model.packageStatus, status.configured,
-           status.generatedAt == nil || status.stale || status.updateError?.isEmpty == false {
-            VStack(alignment: .leading, spacing: 5) {
-                if status.generatedAt == nil { Fact(label: "Malware feed", value: "Not downloaded yet.", warning: true) }
-                if status.stale { Fact(label: "Freshness", value: "Out of date. BoxCop keeps using the last good copy and retries.", warning: true) }
-                if let error = status.updateError, !error.isEmpty { Fact(label: "Last update", value: error, warning: true) }
+        if let status = model.packageStatus, status.configured {
+            VStack(alignment: .leading, spacing: 6) {
+                if status.generatedAt == nil || status.stale || status.updateError?.isEmpty == false {
+                    VStack(alignment: .leading, spacing: 5) {
+                        if status.generatedAt == nil { Fact(label: "Malware feed", value: "Not downloaded yet.", warning: true) }
+                        if status.stale { Fact(label: "Freshness", value: "Out of date. BoxCop keeps using the last good copy and retries.", warning: true) }
+                        if let error = status.updateError, !error.isEmpty { Fact(label: "Last update", value: error, warning: true) }
+                    }
+                }
+                SectionTitle("Allowed releases")
+                if status.exceptions.isEmpty {
+                    Text("None. Every release on the malware feed is blocked. A release that is reported but not confirmed can be allowed from its event.")
+                        .font(.system(size: 12)).foregroundStyle(Palette.quiet).fixedSize(horizontal: false, vertical: true)
+                } else {
+                    RowGroup {
+                        ForEach(Array(status.exceptions.enumerated()), id: \.element) { index, exception in
+                            if index > 0 { RowDivider() }
+                            HStack(spacing: 8) {
+                                Text(exception.release.package).font(.system(size: 12, design: .monospaced)).lineLimit(1).truncationMode(.middle)
+                                Text(exception.release.version).font(.system(size: 12, design: .monospaced)).lineLimit(1)
+                                Text(detail(exception)).font(.system(size: 12)).foregroundStyle(Palette.quiet).lineLimit(1)
+                                Spacer(minLength: 8)
+                                Button("Remove") { model.revokeRelease(exception) }.buttonStyle(.quiet)
+                                    .help("Blocks \(exception.release.display) again.")
+                            }
+                            .padding(.horizontal, 10).frame(height: 32)
+                        }
+                    }
+                    Text("Reported as malware, not confirmed. If the feed later confirms one of these, it is blocked again.")
+                        .font(.system(size: 11.5)).foregroundStyle(Palette.quiet).fixedSize(horizontal: false, vertical: true)
+                }
             }
         }
+    }
+    private func detail(_ exception: PackageException) -> String {
+        let added = exception.added.map { ", allowed " + Format.stamp($0) } ?? ""
+        return (exception.release.ecosystem == "PyPI" ? "from PyPI" : "from npm") + added
     }
 }
 
@@ -193,8 +222,6 @@ private struct OutboundDetails: View {
 
 private struct AgentDetails: View {
     @ObservedObject var model: AppModel
-    @State private var draft: ReviewPolicies?
-
     var body: some View {
         let busy = model.busyLayers.contains(.agentChecks)
         VStack(alignment: .leading, spacing: 10) {
@@ -224,8 +251,6 @@ private struct AgentDetails: View {
                         .buttonStyle(.plain).font(.system(size: 11.5, weight: .medium)).foregroundStyle(Palette.accent).disabled(busy)
                 }
             }
-            SectionTitle("Ask me first")
-            policies
         }
     }
 
@@ -237,40 +262,6 @@ private struct AgentDetails: View {
         case .connected:
             return agent.lastCallback.isEmpty ? "Hooks installed. No action checked yet." : "Last action checked " + Format.stamp(agent.lastCallback)
         }
-    }
-
-    private var policies: some View {
-        let current = draft ?? model.reviewPolicies
-        func change(_ edit: (inout ReviewPolicies) -> Void) {
-            var next = current; edit(&next); draft = next; model.savePolicies(next)
-        }
-        return VStack(alignment: .leading, spacing: 8) {
-            HStack {
-                VStack(alignment: .leading, spacing: 1) {
-                    Text("Ask before an agent sends email or messages").font(.system(size: 12.5, weight: .medium))
-                    Text("Covers recognized mail, sendmail, SMTP and gog or gws send commands.").font(.system(size: 11.5)).foregroundStyle(Palette.quiet)
-                }
-                Spacer()
-                Toggle("", isOn: Binding(get: { current.external }, set: { value in change { $0.external = value } }))
-                    .toggleStyle(SwitchStyle()).labelsHidden().accessibilityLabel("Ask before sends")
-            }
-            HStack {
-                VStack(alignment: .leading, spacing: 1) {
-                    Text("Ask before an agent spends more than \(Double(current.threshold_cents) / 100, format: .currency(code: "USD").precision(.fractionLength(0)))")
-                        .font(.system(size: 12.5, weight: .medium))
-                    Text("Covers Stripe charge and payment commands. Unknown amounts always ask.").font(.system(size: 11.5)).foregroundStyle(Palette.quiet)
-                }
-                Spacer()
-                Stepper("", value: Binding(get: { current.threshold_cents }, set: { value in change { $0.threshold_cents = value } }), in: 0...100_000_000, step: 500)
-                    .labelsHidden().controlSize(.small).disabled(!current.spending).accessibilityLabel("Spending threshold")
-                Toggle("", isOn: Binding(get: { current.spending }, set: { value in change { $0.spending = value } }))
-                    .toggleStyle(SwitchStyle()).labelsHidden().accessibilityLabel("Ask before spending")
-            }
-            Text("Approving needs Touch ID or your Mac password. Security blocks cannot be approved here.").font(.system(size: 11.5)).foregroundStyle(Palette.quiet)
-            if let error = model.reviewError { Text(error).font(.system(size: 12)).foregroundStyle(Palette.red) }
-        }
-        .disabled(!model.capabilities.engine)
-        .onChange(of: model.reviewPolicies) { _, _ in draft = nil }
     }
 }
 
@@ -284,9 +275,19 @@ private struct TriageDetails: View {
                 Text("\(ByteCountFormatter.string(fromByteCount: Int64(setup.downloadedBytes), countStyle: .file)) of \(ByteCountFormatter.string(fromByteCount: Int64(setup.totalBytes), countStyle: .file))")
                     .font(.system(size: 11.5).monospacedDigit()).foregroundStyle(Palette.quiet)
             }
-            Text("The model is a 2.7 GB download on first use and runs only on this Mac. It can add an explanation or ask for a closer look. It can never allow something a rule blocked.")
+            Text("The model is a 2.7 GB download on first use and runs only on this Mac. Uses about 3 GB of memory while it runs. It can add an explanation or ask for a closer look. It can never allow something a rule blocked.")
                 .font(.system(size: 11.5)).foregroundStyle(Palette.quiet).fixedSize(horizontal: false, vertical: true)
-            if !model.triageMessage.isEmpty, layer.state != .off { Text(model.triageMessage).font(.system(size: 11.5)).foregroundStyle(Palette.quiet) }
+            if !model.triageMessage.isEmpty, layer.state == .on { Text(model.triageMessage).font(.system(size: 11.5)).foregroundStyle(Palette.quiet) }
+            // The model can be removed only while nothing is running it.
+            if layer.state == .off || layer.state == .unavailable, let bytes = model.modelBytes {
+                HStack(spacing: 10) {
+                    Text("The downloaded model uses \(ByteCountFormatter.string(fromByteCount: bytes, countStyle: .file)) of disk space.").font(.system(size: 12))
+                    Spacer(minLength: 8)
+                    Button("Remove downloaded model") { model.removeModel() }.buttonStyle(.quiet).disabled(model.modelBusy || !model.capabilities.engine)
+                }
+                .padding(.top, 2)
+            }
+            if !model.modelMessage.isEmpty { Text(model.modelMessage).font(.system(size: 11.5)).foregroundStyle(Palette.quiet).fixedSize(horizontal: false, vertical: true) }
         }
     }
 }
@@ -315,7 +316,7 @@ struct LayerTestSheet: View {
                 step("1", "Run this in Terminal, in any folder.")
                 command(Self.installCommand)
                 step("2", "What should happen")
-                Text("npm should fail with a BoxCop known-malware error and a Blocked event should appear in Events. The package is a harmless name that BoxCop always blocks; nothing is downloaded.")
+                Text("npm should stop with an error that names BoxCop (BOXCOP_KNOWN_MALWARE) and a Blocked event should appear in Events. The package is a harmless name that BoxCop always blocks and that can never be allowed; nothing is downloaded.")
                     .font(.system(size: 12.5)).fixedSize(horizontal: false, vertical: true)
             case .agentChecks:
                 step("1", "Ask \(agentNames) to run this exact command.")

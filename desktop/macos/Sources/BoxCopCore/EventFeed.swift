@@ -1,21 +1,5 @@
 import Foundation
 
-/// An agent action waiting in, or already through, the approval inbox.
-public struct ApprovalItem: Equatable, Sendable {
-    public let id: String
-    public let application: String
-    public let reasons: [String]
-    public let command: String
-    public let status: String
-    public let created: Date
-    public let expires: Date
-    public init(id: String, application: String, reasons: [String], command: String, status: String, created: Date, expires: Date) {
-        self.id = id; self.application = application; self.reasons = reasons; self.command = command
-        self.status = status; self.created = created; self.expires = expires
-    }
-    public func isPending(now: Date) -> Bool { status == "pending" && expires > now }
-}
-
 /// One installed program with an advisory that still needs a decision.
 public struct FindingItem: Equatable, Sendable {
     public let id: String
@@ -35,15 +19,14 @@ public struct FindingItem: Equatable, Sendable {
 /// One row in the Events list, whatever layer it came from.
 public struct FeedEvent: Identifiable, Equatable, Sendable {
     public enum Status: String, Sendable {
-        case blocked, held, approved, rejected, allowed, warned, finding
+        case blocked, warned, finding
         public var label: String { rawValue.prefix(1).uppercased() + rawValue.dropFirst() }
     }
     public enum Action: Equatable, Sendable {
-        case approve, reject, allowForPackage(package: String, host: String), openHealth, copyDetails
+        case allowRelease(PackageRelease), allowForPackage(package: String, host: String), openHealth, copyDetails
         public var title: String {
             switch self {
-            case .approve: return "Approve"
-            case .reject: return "Reject"
+            case .allowRelease: return "Allow this release"
             case .allowForPackage: return "Allow for this package"
             case .openHealth: return "Open in Health"
             case .copyDetails: return "Copy details"
@@ -65,25 +48,25 @@ public struct FeedEvent: Identifiable, Equatable, Sendable {
     public let chain: [String]
     public let signing: String?
     public let policyIDs: [String]
-    /// Set for an approval that is still waiting. These rows are pinned to the top.
-    public let approvalID: String?
+    /// The exact release an install-gate row is about, when the engine named it.
+    public let release: PackageRelease?
+    /// True when that release is reported as malware but not confirmed, and is not already allowed.
+    public let allowable: Bool
     public let exception: ScriptDestinationException?
     /// The local model's explanation, when smart triage produced one.
     public var explanation: String?
 
     public init(id: String, time: Date, layer: LayerID, status: Status, title: String, reason: String, subject: String, source: String,
-                chain: [String] = [], signing: String? = nil, policyIDs: [String] = [], approvalID: String? = nil,
+                chain: [String] = [], signing: String? = nil, policyIDs: [String] = [], release: PackageRelease? = nil, allowable: Bool = false,
                 exception: ScriptDestinationException? = nil, explanation: String? = nil) {
         self.id = id; self.time = time; self.layer = layer; self.status = status; self.title = title; self.reason = reason
         self.subject = subject; self.source = source; self.chain = chain; self.signing = signing; self.policyIDs = policyIDs
-        self.approvalID = approvalID; self.exception = exception; self.explanation = explanation
+        self.release = release; self.allowable = allowable && release != nil; self.exception = exception; self.explanation = explanation
     }
-
-    public var pinned: Bool { approvalID != nil }
 
     public var actions: [Action] {
         var actions: [Action] = []
-        if approvalID != nil { actions += [.approve, .reject] }
+        if let release, allowable, status == .blocked { actions.append(.allowRelease(release)) }
         if let exception, status == .blocked { actions.append(.allowForPackage(package: exception.package, host: exception.host)) }
         if status == .finding { actions.append(.openHealth) }
         return actions + [.copyDetails]
@@ -116,9 +99,6 @@ extension FeedEvent {
         let status: Status
         switch event.outcome {
         case .blocked: status = .blocked
-        case .held: status = .held
-        case .approved: status = .approved
-        case .rejected: status = .rejected
         case .warned: status = .warned
         }
         let agent = event.agent.map(AgentHookHealth.displayName)
@@ -130,10 +110,17 @@ extension FeedEvent {
         if layer == .containment, status == .blocked, let package = event.package, let host = event.host {
             exception = ScriptDestinationException(package: package, host: host)
         } else { exception = nil }
-        self.init(id: "engine:" + event.id, time: event.time, layer: layer, status: status, title: event.title, reason: event.reason,
+        // The feed has two tiers. Only the unconfirmed one may be allowed, and its row always says which tier it is.
+        var reason = event.reason
+        if layer == .installGate, status == .blocked, event.reportedOnly, !reason.localizedCaseInsensitiveContains("not yet confirmed") {
+            reason = Self.reportedNotice + (reason.isEmpty ? "." : ". " + reason)
+        }
+        self.init(id: "engine:" + event.id, time: event.time, layer: layer, status: status, title: event.title, reason: reason,
                   subject: event.subject.isEmpty ? (event.package ?? event.host ?? event.command ?? "") : event.subject,
-                  source: agent ?? (layer == .agentChecks ? "Agent" : "Package install"), chain: chain, policyIDs: event.policyIDs, exception: exception)
+                  source: agent ?? (layer == .agentChecks ? "Agent" : "Package install"), chain: chain, policyIDs: event.policyIDs,
+                  release: event.release, allowable: status == .blocked && event.allowable, exception: exception)
     }
+    public static let reportedNotice = "Reported as malware, not yet confirmed"
 
     /// Layer 3. Only connections the network extension dropped become events.
     public init?(network event: NetworkActivityEvent) {
@@ -156,31 +143,6 @@ extension FeedEvent {
                   source: app ?? process ?? "Unknown app", chain: chain, signing: signing.isEmpty ? nil : signing.joined(separator: ", "))
     }
 
-    /// Layer 4 approval inbox. A waiting request is pinned; an answered one is history.
-    public init(approval item: ApprovalItem, now: Date) {
-        let agent = AgentActionDetails.agentName(item.application)
-        let labels = item.reasons.map(AgentActionDetails.reasonLabel)
-        let rule = labels.isEmpty ? "one of your approval rules" : "your approval rule for " + LayerRules.list(labels.map { $0.lowercased() })
-        let pending = item.isPending(now: now)
-        let status: Status, title: String, reason: String
-        switch (pending, item.status) {
-        case (true, _):
-            status = .held; title = "\(agent) is waiting for your approval"
-            reason = "This command matched \(rule). The agent is paused until you approve or reject it."
-        case (_, "approved"), (_, "consumed"):
-            status = .approved; title = "You approved a \(agent) action"
-            reason = "This command matched \(rule) and you approved it once."
-        case (_, "rejected"):
-            status = .rejected; title = "You rejected a \(agent) action"
-            reason = "This command matched \(rule) and you rejected it."
-        default:
-            status = .rejected; title = "A \(agent) approval request expired"
-            reason = "This command matched \(rule). Nobody answered in time, so it was not allowed."
-        }
-        self.init(id: "approval:" + item.id, time: item.created, layer: .agentChecks, status: status, title: title, reason: reason,
-                  subject: item.command, source: agent, chain: [agent, item.command].filter { !$0.isEmpty }, approvalID: pending ? item.id : nil)
-    }
-
     /// Layer 5. One row per installed program that still needs a decision.
     public init(finding item: FindingItem) {
         self.init(id: "finding:" + item.id, time: item.checkedAt, layer: .machineHealth, status: .finding,
@@ -193,7 +155,7 @@ extension FeedEvent {
 
 public struct EventFilter: Equatable, Sendable {
     public enum Kind: String, CaseIterable, Sendable, Identifiable {
-        case all = "All", blocked = "Blocked", held = "Held", findings = "Findings"
+        case all = "All", blocked = "Blocked", findings = "Findings"
         public var id: String { rawValue }
     }
     public var kind: Kind
@@ -205,7 +167,6 @@ public struct EventFilter: Equatable, Sendable {
         switch kind {
         case .all: break
         case .blocked: guard event.status == .blocked else { return false }
-        case .held: guard event.status == .held else { return false }
         case .findings: guard event.status == .finding else { return false }
         }
         if let layer, event.layer != layer { return false }
@@ -216,14 +177,10 @@ public struct EventFilter: Equatable, Sendable {
 }
 
 public enum EventFeed {
-    /// One list from every source: waiting approvals first, then newest first. Duplicate ids keep the first row.
-    public static func merge(security: [SecurityEvent], network: [NetworkActivityEvent], approvals: [ApprovalItem], findings: [FindingItem],
-                             explanations: [String: String] = [:], now: Date = Date()) -> [FeedEvent] {
-        let approvalRows = approvals.map { FeedEvent(approval: $0, now: now) }
-        // The inbox row carries the buttons, so an engine row for the same request is dropped.
-        let approvalIDs = Set(approvals.map { "engine:" + $0.id })
-        var rows = approvalRows
-        rows += security.filter { !approvalIDs.contains("engine:" + $0.id) }.map(FeedEvent.init)
+    /// One list from every source, newest first. Duplicate ids keep the first row.
+    public static func merge(security: [SecurityEvent], network: [NetworkActivityEvent], findings: [FindingItem],
+                             explanations: [String: String] = [:]) -> [FeedEvent] {
+        var rows = security.map(FeedEvent.init)
         rows += network.compactMap(FeedEvent.init(network:))
         rows += findings.map(FeedEvent.init(finding:))
         var seen = Set<String>()
@@ -233,11 +190,7 @@ public enum EventFeed {
     }
 
     public static func sort(_ rows: [FeedEvent]) -> [FeedEvent] {
-        rows.sorted { a, b in
-            if a.pinned != b.pinned { return a.pinned }
-            if a.time != b.time { return a.time > b.time }
-            return a.id < b.id
-        }
+        rows.sorted { a, b in a.time != b.time ? a.time > b.time : a.id < b.id }
     }
 
     public static func filter(_ rows: [FeedEvent], _ filter: EventFilter) -> [FeedEvent] { rows.filter(filter.matches) }

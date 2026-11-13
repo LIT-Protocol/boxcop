@@ -37,7 +37,7 @@ final class ProcessTests: XCTestCase {
     func testStderrCannotBlockOrLeakToCaller() async throws {
         let client = EngineClient(requestTimeout: 1)
         try await client.start(configuration: config("stderr"))
-        do { _ = try await client.request(.workflowClear); XCTFail("Expected safe error") }
+        do { _ = try await client.request(.workflowClear()); XCTFail("Expected safe error") }
         catch { XCTAssertEqual(error as? EngineFailure, .invalidRequest); XCTAssertFalse(String(describing: error).contains("PRIVATE_MARKER")) }
         await client.stop()
     }

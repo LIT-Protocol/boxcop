@@ -18,6 +18,8 @@ from .workflow_judgment import WorkflowJudge
 
 MAX_LINE_BYTES = 262144  # Includes the terminating LF, on both pipes.
 REQUEST_ID = re.compile(r"[A-Za-z0-9_-]{1,64}")
+# The app runs a second engine with this data folder name to review linked activity.
+REVIEWER_DIRECTORY = "workflow-review"
 ERROR_MESSAGES = {
     "invalid_request": "Invalid request.",
     "line_too_large": "Request line too large.",
@@ -68,10 +70,26 @@ def _validate(request):
     }
     if not isinstance(operation, str) or operation not in shapes:
         raise ValueError("Invalid operation")
-    if set(request) != {"version", "id", "op"} | shapes[operation]:
+    fields = shapes[operation]
+    release = operation == "package_protection" and request.get("action") in ("allow", "revoke")
+    if release:
+        # Allowing or revoking names one exact release; the other actions take nothing.
+        # `version` is the protocol version of every request, so the release's is `package_version`.
+        fields = fields | {"ecosystem", "package", "package_version"}
+    if operation == "workflow_clear" and "remove_model" in request:
+        fields = fields | {"remove_model"}
+        if type(request["remove_model"]) is not bool:
+            raise ValueError("Invalid model removal flag")
+    if set(request) != {"version", "id", "op"} | fields:
         raise ValueError("Invalid fields")
-    if operation == "package_protection" and request["action"] not in ("status", "enable", "disable"):
+    if operation == "package_protection" and not release and request["action"] not in ("status", "enable", "disable"):
         raise ValueError("Invalid package action")
+    if release:
+        if request["ecosystem"] not in ("npm", "PyPI"):
+            raise ValueError("Invalid ecosystem")
+        if (not isinstance(request["package"], str) or not 0 < len(request["package"]) <= 214
+                or not isinstance(request["package_version"], str) or not 0 < len(request["package_version"]) <= 128):
+            raise ValueError("Invalid release")
     if operation == "script_protection":
         if request["action"] not in ("status", "enable", "disable", "allow", "revoke"):
             raise ValueError("Invalid install-script action")
@@ -101,7 +119,8 @@ def _script_runtime(engine):
 def _dispatch(request, engine):
     operation = request["op"]
     if operation == "package_protection":
-        return {'packageProtection': _package_runtime(engine).command(request['action'])}
+        return {'packageProtection': _package_runtime(engine).command(
+            request['action'], *(request.get(key) for key in ('ecosystem', 'package', 'package_version')))}
     if operation == "script_protection":
         return {'scriptProtection': _script_runtime(engine).command(request['action'], request['package'], request['host'])}
     if operation == "security_events":
@@ -111,13 +130,17 @@ def _dispatch(request, engine):
         package = getattr(engine, 'package_runtime', None)
         scripts = getattr(engine, 'script_runtime', None)
         return {"events": security_events(
-            request["limit"], store=engine.store, data_directory=engine.store.path.parent,
+            request["limit"], store=engine.store,
             package_directory=package.directory if package else state_directory(),
             script_directory=scripts.directory if scripts else script_directory())}
     if operation == "workflow_clear":
-        engine.workflow_context.clear()
+        engine.workflow_context.clear()  # Stops this engine's model runtime, if it has one.
         engine.classifier.clear()
-        return {"workflowCleared": True}
+        if not request.get("remove_model"):
+            return {"workflowCleared": True}
+        from .local_inference import remove_model
+        freed = remove_model(getattr(engine, "model_directory", None))
+        return {"workflowCleared": True, "modelRemoved": freed is not None, "freedBytes": freed or 0}
     if operation == "workflow_context":
         return {"workflow": engine.workflow_context.accept(request["context"], engine.classifier)}
     if operation == "status":
@@ -252,9 +275,6 @@ def _serve(engine):
 def main(argv=None):
     """Frozen launchers call this directly. There is no HTTP server and no implicit data path."""
     arguments = sys.argv[1:] if argv is None else argv
-    if arguments[:1] == ['--human-review']:
-        from .human_review import main as review_main
-        return review_main(arguments[1:])
     if arguments[:1] == ['--package-setup']:
         from tools.package_service import management_main
         return management_main(arguments[1:])
@@ -284,7 +304,10 @@ def main(argv=None):
             from .classifier_usage import ClassifierUsage
             store = _private_store(arguments[1])
             engine = Engine(store)
-            engine.workflow_context = WorkflowContextStore(WorkflowJudge(usage=ClassifierUsage(store)))
+            # One model runtime: only the reviewer sidecar gets a judge. The main engine
+            # keeps the default context store, which has none and can start nothing.
+            if Path(arguments[1]).name == REVIEWER_DIRECTORY:
+                engine.workflow_context = WorkflowContextStore(WorkflowJudge(usage=ClassifierUsage(store)))
         except Exception:
             sys.stderr.write("BoxCop engine could not start.\n")
             return 2
@@ -297,7 +320,8 @@ def main(argv=None):
                 engine.package_runtime.close()
             if hasattr(engine, 'script_runtime'):
                 engine.script_runtime.close()
-            engine.workflow_context.judge.close()
+            if engine.workflow_context.judge is not None:
+                engine.workflow_context.judge.close()
     finally:
         os.umask(previous_mask)
 

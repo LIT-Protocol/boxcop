@@ -173,16 +173,29 @@ public enum LayerRules {
         return .init(.machineHealth, .on, findings == 0 ? "No findings need your attention." : "\(findings) finding\(findings == 1 ? "" : "s") to review.")
     }
 
-    public static func smartTriage(engineAvailable: Bool, runtimeAvailable: Bool, wanted: Bool, setupState: String? = nil, fraction: Double = 0, live: Bool = true) -> LayerStatus {
+    /// `setupMessage` is the engine's own sentence for a failed setup and is shown as written.
+    /// `modelDownloaded` is nil when nobody looked on disk.
+    public static func smartTriage(engineAvailable: Bool, runtimeAvailable: Bool, wanted: Bool, setupState: String? = nil, fraction: Double = 0,
+                                   setupMessage: String? = nil, modelDownloaded: Bool? = nil, live: Bool = true) -> LayerStatus {
         guard engineAvailable else { return .init(.smartTriage, .unavailable, engineMissing) }
         guard runtimeAvailable else { return .init(.smartTriage, .unavailable, "This build does not include the local model runtime.") }
-        guard wanted else { return .init(.smartTriage, .off, "Turn on smart triage in BoxCop. The model is a 2.7 GB download on first use.") }
-        guard live else { return .init(.smartTriage, .on, "Turned on. Model status is shown in BoxCop while it is running.") }
+        guard wanted else {
+            return .init(.smartTriage, .off, modelDownloaded == true ? "Turn on smart triage in BoxCop. The model is already downloaded."
+                         : "Turn on smart triage in BoxCop. The model is a 2.7 GB download on first use.")
+        }
+        guard live else {
+            switch modelDownloaded {
+            case true?: return .init(.smartTriage, .on, "Turned on. The model is downloaded. It runs while BoxCop is open.")
+            case false?: return .init(.smartTriage, .needsSetup, "Turned on, but the model is not downloaded yet. Open BoxCop to download it (2.7 GB).")
+            case nil: return .init(.smartTriage, .on, "Turned on. Model status is shown in BoxCop while it is running.")
+            }
+        }
         switch setupState {
         case "ready": return .init(.smartTriage, .on, "The local model is ready.")
         case "downloading", "waiting_for_download": return .init(.smartTriage, .needsSetup, "Downloading the model: \(Int(fraction * 100))% of 2.7 GB.")
         case "verifying", "loading": return .init(.smartTriage, .needsSetup, "Loading the model.")
-        case "error": return .init(.smartTriage, .needsSetup, "The model could not be downloaded or loaded. Check your connection, then turn smart triage off and on.")
+        case "error":
+            return .init(.smartTriage, .needsSetup, setupMessage ?? "The model could not be downloaded or loaded. Check your connection, then turn smart triage off and on.")
         default: return .init(.smartTriage, .needsSetup, "Waiting for the first event to start the model.")
         }
     }

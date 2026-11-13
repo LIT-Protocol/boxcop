@@ -45,7 +45,7 @@ private struct Sidebar: View {
             }
             .padding(.leading, 8).padding(.bottom, 14)
             item(.overview)
-            item(.events, badge: model.pendingApprovalCount, badgeColor: Palette.amber)
+            item(.events)
             item(.protections)
             item(.health, badge: model.wants(.machineHealth) ? model.activeFindings.count : 0, badgeColor: Palette.accent)
             Spacer()
@@ -155,7 +155,7 @@ struct OverviewView: View {
                         }
                     }
                     if events.isEmpty {
-                        Text("Nothing has been blocked or held yet.").font(.system(size: 12.5)).foregroundStyle(Palette.quiet).padding(.vertical, 4)
+                        Text("Nothing has been blocked yet.").font(.system(size: 12.5)).foregroundStyle(Palette.quiet).padding(.vertical, 4)
                     } else {
                         RowGroup {
                             ForEach(Array(events.prefix(5).enumerated()), id: \.element.id) { index, event in

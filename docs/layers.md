@@ -10,6 +10,9 @@ against, and are where new protections tend to appear first.
 
 ## Porting rule
 
+BoxCop is licensed under Apache-2.0, so what it takes from other projects has to
+be compatible with that.
+
 - **Permissively licensed tools** (Apache-2.0 or MIT: sandbox-runtime, nono,
   Pipelock core, SkillSpector, agent-scan, OSV-Scanner, Gitleaks, Santa): rules and
   logic may be adapted, with attribution.
@@ -27,14 +30,24 @@ whose notes are in [research/aikido](../research/aikido/README.md).
 ## 1. Install gate
 
 **What it does.** Blocks npm and PyPI releases that are listed as malicious, at the
-moment a package manager asks for them. Holds agent reads and writes of skill and
+moment a package manager asks for them. Denies agent reads and writes of skill and
 instruction files that contain hostile patterns.
 
 **How.** A read-only registry proxy on `127.0.0.1:8794` sits between the package
-manager and the public registry. It removes listed releases from metadata and
-refuses their downloads. The list is a signed snapshot built from Datadog, OpenSSF
-and GitHub malware intelligence, verified with a public key pinned in the app, and
-refreshed every 15 minutes. The package named `boxcop-test-malware` is always
+manager and the public registry. The list is a signed snapshot built from Datadog,
+OpenSSF and GitHub malware intelligence, verified with a public key pinned in the
+app, and refreshed every 15 minutes. It has two tiers, and the proxy refuses both:
+
+- **Confirmed malware.** Refused with HTTP 403 and the code `BOXCOP_KNOWN_MALWARE`.
+- **Reported as malware, not yet confirmed.** Refused with HTTP 403 and the code
+  `BOXCOP_REPORTED_MALWARE`. You can allow one exact release of this tier from its
+  event with **Allow this release**, and remove the exception under Protections.
+  Confirmed malware cannot be allowed.
+
+A blocked version stays in the version list, marked deprecated (npm, pnpm) or
+yanked (PyPI) with a BoxCop message, and its download answers 403. A range or a
+tag therefore resolves to the highest clean version, and an exact request for the
+blocked version fails with an error that names BoxCop. The package named `boxcop-test-malware` is always
 blocked so the gate can be tested without real malware. Routing npm and pnpm
 through the proxy is opt-in and reversible.
 
@@ -47,8 +60,9 @@ through the proxy is opt-in and reversible.
 | Skill and instruction checks | `server/skill_security.py`, `tools/skill_scan.py` |
 | Docs | [package-registry-firewall.md](package-registry-firewall.md), [skill-security.md](skill-security.md) |
 
-**Limits.** No minimum release age, so a malicious release is allowed until a
-source lists it. The app routes npm and pnpm only; pip and uv work when pointed at
+**Limits.** The reported tier includes research and borderline packages, so a
+legitimate release can be refused until you allow it. No minimum release age, so a
+malicious release is allowed until a source lists it. The app routes npm and pnpm only; pip and uv work when pointed at
 the proxy by hand. Private registries, direct URLs, git dependencies and existing
 caches bypass the proxy. No MCP server or editor extension checks. Skill checks are
 narrow text patterns.
@@ -69,14 +83,14 @@ servers and skills across every installed agent, with no token or upload.
 
 **What it does.** Runs code with limits instead of trusting it. Today that means
 npm dependency install scripts: a contained script, and everything it starts, can
-connect only to approved destinations.
+connect only to allowed destinations.
 
 **How.** npm's `script-shell` setting points at a BoxCop wrapper. The wrapper
 re-executes dependency install scripts under `sandbox-exec` with a profile that
 denies all network access except BoxCop's loopback listeners, and denies writes to
 shell startup files, `~/.npmrc` and LaunchAgents. A local proxy on
 `127.0.0.1:8795` allows a destination only if it is on the built-in list or
-approved by the user for that package. Refused connections are recorded with the
+allowed by the user for that package. Refused connections are recorded with the
 package name and the agent that started the install. The engine's `--contain`
 mode applies the same sandbox and proxy to one command given on the command line.
 
@@ -88,7 +102,7 @@ mode applies the same sandbox and proxy to one command given on the command line
 
 **Limits.** Automatic containment covers npm install scripts only. It limits
 outbound connections and a few write paths; a contained script can still read
-files and can misuse a host that is approved. It applies at install time, so code
+files and can misuse a host that is allowed. It applies at install time, so code
 a package leaves behind runs normally later. `sandbox-exec` is deprecated by
 Apple. Not yet exercised in a signed, installed build at scale.
 
@@ -136,23 +150,20 @@ documents. Next: per-app rules keyed to signing identity.
 ## 4. Agent action checks
 
 **What it does.** Checks what a coding agent is about to do, before it does it.
-Holds recognizable credential access, exfiltration and dangerous commands. An
-optional approval inbox holds outgoing messages and spending until the person
-approves.
+Denies recognizable credential access, exfiltration and dangerous commands.
 
 **How.** BoxCop registers pre-action hooks in the user configuration of Claude
 Code, Codex and Cursor. Each hook calls `BoxCop --host-agent-hook <agent>`, which
 evaluates the action against deterministic rules and answers allow or deny within
-the agent's hook deadline. Approval requests are bound to the exact action and
-need Mac authentication.
+the agent's hook deadline. A denial is final for that action; there is no later
+decision to wait for.
 
 | | |
 | --- | --- |
 | Hook installation, callbacks, health | `server/host_agents.py`, `server/host_agent_verification.py` |
 | Command and path rules | `server/commands.py`, `server/classify.py`, `server/engine.py` |
-| Approval inbox | `server/human_review.py`, `server/communication_commands.py` |
 | Native hook launcher | `desktop/macos/Sources/BoxCopCore/HostHookSupervisor.swift` |
-| Docs | [host-agent-protection.md](host-agent-protection.md), [human-review.md](human-review.md) |
+| Docs | [host-agent-protection.md](host-agent-protection.md) |
 
 **Limits.** Cooperative: the agent must call the hook, and the rules read command
 text, so an effect hidden inside a script or behind an alias evades them. Codex is
@@ -200,31 +211,35 @@ whose patterns are shared with outbound secret detection.
 
 ## 6. Smart triage
 
-**What it does.** Uses a local model to explain held actions in plain language
-and to review linked activity, so a person who cannot read a script still gets a
-useful answer.
+**What it does.** Uses a local model to review linked activity and explain events
+in plain language, so a person who cannot read a script still gets a useful
+answer.
 
 **How.** The app ships a statically linked llama.cpp server. On first use it
-downloads a pinned, checksum-verified Qwen 4B model (2.7 GB). The engine runs it
-on loopback with an authentication token, sends bounded evidence as untrusted
-data, and accepts only schema-valid output whose citations point at supplied
-events.
+downloads a pinned, checksum-verified Qwen 4B model (2.7 GB), but only when the
+disk has room for the model plus 4 GB. Exactly one model runtime runs, on loopback
+with an authentication token, and it uses about 3 GB of memory while running. The
+model is given the engine's events (install gate, containment, agent checks)
+alongside network history, as bounded, untrusted data. Only schema-valid output
+whose citations point at supplied events is accepted, so an explanation attaches
+to the event it cites in the Events list. The triage card under Protections can
+remove the downloaded model.
 
 | | |
 | --- | --- |
 | Model runtime management | `server/local_inference.py` |
 | Linked-activity review | `server/workflow_judgment.py`, `server/workflow_context.py` |
-| Approval summaries | `server/human_review.py` |
 | Runtime build | `desktop/macos/scripts/bundle_inference.py` |
 | Docs | [workflow-judgment.md](workflow-judgment.md), [workflow-context.md](workflow-context.md) |
 
 **The rule.** The model may tighten protection, never loosen it. Its output is
-advisory text. It cannot approve a request, lift a block or change a policy; only
+advisory text. It cannot allow an action, lift a block or change a policy; only
 the user can. The model reads attacker-controlled text, so nothing it says is
 allowed to grant access.
 
 **Limits.** It does not yet decide which protections apply to what. A small local
-model can miss risk or overstate it. Without the model, nothing else changes: the
+model can miss risk or overstate it. It needs about 3 GB of free memory and has
+not yet been accepted in the VM lab. Without the model, nothing else changes: the
 deterministic layers decide on their own.
 
 ## Keeping up

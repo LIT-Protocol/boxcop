@@ -26,12 +26,12 @@ def assess(name: str, version: str, *, ecosystem: str | None = None) -> Finding 
             verdict = policy.assess(ecosystem, name, version)
             if verdict['decision'] == 'block':
                 row = next(row for row in verdict['reports'] if row['disposition'] == 'block')
-                return Finding('known-malicious-package', 'This package release is listed as malicious in the verified package policy. Review the source report and choose an unaffected release.', row['url'])
+                return Finding('known-malicious-package', 'This package release is listed as malicious in the verified package policy. Read the source report and choose an unaffected release.', row['url'])
     name = re.sub(r'[-_.]+', '-', name.lower())
     if ecosystem in {None, 'PyPI'} and name == 'litellm' and version in {'1.82.7', '1.82.8', '1.107.0'}:
-        return Finding('known-malicious-package', 'This exact LiteLLM release is a confirmed malicious distribution. Choose a reviewed release and investigate any previous execution.', LITELLM_SOURCE if version == '1.107.0' else 'https://blog.pypi.org/posts/2026-04-02-incident-report-litellm-telnyx-supply-chain-attack/')
+        return Finding('known-malicious-package', 'This exact LiteLLM release is a confirmed malicious distribution. Choose an unaffected release and investigate any previous execution.', LITELLM_SOURCE if version == '1.107.0' else 'https://blog.pypi.org/posts/2026-04-02-incident-report-litellm-telnyx-supply-chain-attack/')
     if ecosystem in {None, 'npm'} and name == '@subql/common' and version == '5.8.3':
-        return Finding('known-malicious-package', 'This exact SubQuery package release contains credential-stealing malware. Choose a reviewed release and investigate any previous execution.', 'https://www.stepsecurity.io/blog/subql-ecosystem-compromised')
+        return Finding('known-malicious-package', 'This exact SubQuery package release contains credential-stealing malware. Choose an unaffected release and investigate any previous execution.', 'https://www.stepsecurity.io/blog/subql-ecosystem-compromised')
     if ecosystem is not None or name != 'php':
         return None
     # Do not interpret vendor suffixes as upstream versions: fixes may be backported.

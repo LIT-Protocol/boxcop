@@ -5,14 +5,18 @@ public struct WorkflowJudgmentStatus: Decodable, Sendable {
     public struct Finding: Decodable, Sendable {
         public let summary: String
         public let recommendation: String
-        public let eventIDs: [UUID]
+        /// Timeline ids: a UUID string, or `engine:<event id>` for an engine decision.
+        public let eventIDs: [String]
+        public init(summary: String, recommendation: String, eventIDs: [String]) {
+            self.summary = summary; self.recommendation = recommendation; self.eventIDs = eventIDs
+        }
     }
     public struct Review: Decodable, Sendable {
         public let snapshotID: String
         public let contextID: UUID
         public let revision: Int
         public let observedAt: String
-        public let evidenceEventIDs: [UUID]
+        public let evidenceEventIDs: [String]
         public let intent: String
         public let risk: String
         public let findings: [Finding]
@@ -23,6 +27,17 @@ public struct WorkflowJudgmentStatus: Decodable, Sendable {
         public let state: String
         public let downloadedBytes: Int
         public let totalBytes: Int
+        /// The engine's own sentence for a failed setup, shown as written. Nil unless `state` is `error`.
+        public let message: String?
+        enum CodingKeys: String, CodingKey { case state, downloadedBytes, totalBytes, message }
+        public init(from decoder: Decoder) throws {
+            let c = try decoder.container(keyedBy: CodingKeys.self)
+            state = try c.decode(String.self, forKey: .state)
+            downloadedBytes = try c.decode(Int.self, forKey: .downloadedBytes)
+            totalBytes = try c.decode(Int.self, forKey: .totalBytes)
+            let text = ((try? c.decodeIfPresent(String.self, forKey: .message)) ?? nil)?.trimmingCharacters(in: .whitespacesAndNewlines)
+            message = text.flatMap { $0.isEmpty ? nil : String($0.prefix(400)) }
+        }
         public var isValid: Bool {
             ["waiting", "waiting_for_download", "downloading", "verifying", "loading", "ready", "error"].contains(state) &&
                 totalBytes > 0 && totalBytes <= 10_000_000_000 && downloadedBytes >= 0 && downloadedBytes <= totalBytes
@@ -43,7 +58,7 @@ public struct WorkflowJudgmentStatus: Decodable, Sendable {
         guard let result else { return state != "ready" }
         let ids = Set(result.evidenceEventIDs)
         return state == "ready" && superseded != nil && result.snapshotID.count == 64 && result.revision >= 0 &&
-            result.observedAt.count <= 64 && result.intent.count <= 240 && ids.count <= 64 &&
+            result.observedAt.count <= 64 && result.intent.count <= 240 && ids.count <= 64 && ids.allSatisfy(EngineObservation.citable) &&
             ["no_concern_observed", "needs_review", "high_risk", "insufficient_evidence"].contains(result.risk) &&
             result.findings.count <= 3 && result.uncertainties.count <= 5 && result.uncertainties.allSatisfy { $0.count <= 240 } &&
             result.findings.allSatisfy { $0.summary.count <= 400 && $0.recommendation.count <= 240 &&

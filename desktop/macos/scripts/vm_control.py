@@ -76,10 +76,15 @@ def main():
     p.add_argument('--key',nargs='+')
     p.add_argument('--text',help='Synthetic non-secret test text only')
     p.add_argument('--login-password',action='store_true',help='Type saved guest password into an already inspected authentication field')
-    p.add_argument('--host',help='Guest IP address, when the HostName saved in ~/.sentinel-lab/ssh_config is stale')
+    p.add_argument('--host',help='Guest IP address; by default ~/.sentinel-lab/lab finds it')
     args=p.parse_args()
     with socket.socket() as sock:
         sock.bind(('127.0.0.1',0));port=sock.getsockname()[1]
+    helper=Path.home()/'.sentinel-lab/lab'
+    if not args.host and helper.exists():  # the helper finds the acceptance VM by its MAC address
+        found=subprocess.run([str(helper),'ip'],capture_output=True,text=True)
+        if found.returncode: raise SystemExit(found.stderr.strip() or 'the lab VM is not reachable')
+        args.host=found.stdout.strip()
     if args.host and not re.fullmatch(r'[0-9A-Fa-f:.]+',args.host): raise SystemExit('--host must be an IP address')
     override=['-oHostName='+args.host] if args.host else []
     tunnel=subprocess.Popen(['ssh','-F',str(Path.home()/'.sentinel-lab/ssh_config'),'-oBatchMode=yes',*override,

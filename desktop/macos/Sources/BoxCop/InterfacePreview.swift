@@ -29,12 +29,18 @@ import BoxCopCore
             let model = try Fixtures.model(.active); model.page = .events
             model.selectedEventID = model.events.first { $0.layer == .outboundControl }?.id; return model
         }
-        try window("events-held") {
-            let model = try Fixtures.model(.active); model.page = .events; model.selectedEventID = model.events.first(where: \.pinned)?.id; return model
+        try window("events-reported") {
+            let model = try Fixtures.model(.active); model.page = .events; model.selectedEventID = "engine:evt-reported"; return model
         }
         try window("events-empty") { let model = try Fixtures.model(.notProtected); model.page = .events; return model }
         try window("protections") { let model = try Fixtures.model(.protected); model.page = .protections; return model }
         try window("protections-all", height: 1500) { let model = try Fixtures.model(.partly); model.page = .protections; return model }
+        try window("protections-model", height: 1500) { let model = try Fixtures.model(.protected); model.page = .protections; return model }
+        try window("protections-triage-error", height: 1500) {
+            let model = try Fixtures.model(.partly); model.page = .protections
+            model.judgment = try Fixtures.decode(WorkflowJudgmentStatus.self, #"{"state":"waiting","model":"local","promptVersion":"v7","advisoryOnly":true,"setup":{"state":"error","downloadedBytes":0,"totalBytes":2740937888,"message":"Not enough free disk space to download the triage model. It needs 6.8 GB free (a 2.7 GB download plus 4 GB left over) and 3.1 GB is available."}}"#)
+            return model
+        }
         try window("health") { let model = try Fixtures.model(.active); model.page = .health; return model }
         try window("health-clear") { let model = try Fixtures.model(.protected); model.page = .health; return model }
         try window("settings") { let model = try Fixtures.model(.protected); model.page = .settings; return model }
@@ -99,7 +105,6 @@ private struct TrafficLights: View {
                         line(state.statusLine, quiet: true)
                         divider
                         line("Open BoxCop")
-                        if let approvals = state.approvalsLine { line(approvals) }
                         line(state.pauseLine)
                         divider
                         HStack { line("Quit BoxCop"); Spacer(); Text("⌘Q").font(.system(size: 13)).foregroundStyle(Palette.quiet).padding(.trailing, 12) }
@@ -145,7 +150,6 @@ private struct TrafficLights: View {
         let model = AppModel(defaults: defaults, preview: true,
                              capabilities: Capabilities(engine: true, networkExtension: true, networkPlacementIssue: nil, triageRuntime: true, version: "0.1.0"))
         model.agentsLoaded = true
-        model.reviewLoaded = true
         model.loginEnabled = true
         model.inventoryCheckedAt = now.addingTimeInterval(-140)
         model.findingFirstSeen = ["obs-openssl|3.3.1": now.addingTimeInterval(-4000), "obs-curl|8.9.0": now.addingTimeInterval(-4000),
@@ -166,23 +170,14 @@ private struct TrafficLights: View {
         model.packageStatus = try package(routed: true, now: now)
         model.scriptStatus = try scripts(routed: true)
         model.securityEvents = securityEvents(now)
-        let requests = [
-            ReviewRequest(id: "rq-send", status: "pending", application: "codex", source: "hook", command: "gog send --to finance@northwind.example --subject \"Q4 invoice\"",
-                          input: "{}", reasons: ["Review external communications"], expires: now.addingTimeInterval(480).timeIntervalSince1970,
-                          created: now.addingTimeInterval(-120).timeIntervalSince1970),
-            ReviewRequest(id: "rq-old", status: "approved", application: "claude", source: "hook", command: "stripe charges create --amount 4900 --currency usd",
-                          input: "{}", reasons: ["Review spending above a threshold"], expires: now.addingTimeInterval(-6000).timeIntervalSince1970,
-                          created: now.addingTimeInterval(-7200).timeIntervalSince1970, reviewed_at: now.addingTimeInterval(-7100).timeIntervalSince1970)]
         if kind == .partly {
             model.agents = [agent("claude", "callback observed", callback: -95), agent("codex", "callback observed", callback: -1900),
                             agent("cursor", "callback error", callback: -86_000, next: "Hooks stopped answering. Repair to reinstall them.")]
             model.network.extensionState = .awaitingApproval
             model.network.setupPhase = .extensionApproval
             model.inventory = try inventory(findings: true, now: now)
-            model.reviewPolicies = ReviewPolicies(external: true, destructive: false, spending: true, threshold_cents: 2500, currency: "usd")
-            model.reviewRequests = requests
             model.wanted.insert(.smartTriage)
-            model.judgment = try decode(WorkflowJudgmentStatus.self, #"{"state":"waiting","model":"local","promptVersion":"v2","advisoryOnly":true,"setup":{"state":"downloading","downloadedBytes":1140000000,"totalBytes":2740937888}}"#)
+            model.judgment = try decode(WorkflowJudgmentStatus.self, #"{"state":"waiting","model":"local","promptVersion":"v7","advisoryOnly":true,"setup":{"state":"downloading","downloadedBytes":1140000000,"totalBytes":2740937888}}"#)
             return model
         }
         model.agents = [agent("claude", "callback observed", callback: -95), agent("codex", "callback observed", callback: -1900), agent("cursor", "not detected")]
@@ -190,17 +185,16 @@ private struct TrafficLights: View {
         model.network.filterEnabled = true
         model.network.snapshot = snapshot(now, reachable: true)
         model.inventory = try inventory(findings: false, now: now)
-        model.reviewPolicies = ReviewPolicies(external: true, destructive: false, spending: false, threshold_cents: 2500, currency: "usd")
+        // Smart triage was used before and is off now, so the model is still on disk.
+        model.modelBytes = 2_740_937_888
         if kind == .active {
-            // Everything on, with one approval waiting, findings to review and the local model ready.
+            // Everything on, with findings to look at and the local model ready.
             model.inventory = try inventory(findings: true, now: now)
             model.selectedFixes = ["fix-openssl", "fix-curl"]
-            model.reviewPolicies = ReviewPolicies(external: true, destructive: false, spending: true, threshold_cents: 2500, currency: "usd")
-            model.reviewRequests = requests
-            model.reviewSummaries = ["rq-send": try decode(ReviewSummary.self, #"{"summary":"Sends an email with an invoice attachment to an address outside your contacts.","concerns":[],"failed":false}"#)]
             model.wanted.insert(.smartTriage)
-            model.judgment = try decode(WorkflowJudgmentStatus.self, #"{"state":"waiting","model":"local","promptVersion":"v2","advisoryOnly":true,"setup":{"state":"ready","downloadedBytes":2740937888,"totalBytes":2740937888}}"#)
-            model.explanations = ["engine:evt-install": "The agent tried to install a package name that matches a known malicious release. Nothing was downloaded. Check where the agent found this package name before retrying.",
+            model.judgment = try decode(WorkflowJudgmentStatus.self, #"{"state":"waiting","model":"local","promptVersion":"v7","advisoryOnly":true,"setup":{"state":"ready","downloadedBytes":2740937888,"totalBytes":2740937888}}"#)
+            model.explanations = ["engine:evt-reported": "Claude Code asked npm for a release that one advisory source reports as malware. No one has confirmed the report. Allow it only if you know this release and trust where it comes from.",
+                                  "engine:evt-install": "The agent tried to install a package name that matches a known malicious release. Nothing was downloaded. Check where the agent found this package name before retrying.",
                                   "network:" + blockedConnection(now).id.uuidString: "A helper started by Cursor tried to reach a host listed for malware delivery shortly after a package install. Check which extension or script started it."]
         }
         if kind == .paused {
@@ -212,17 +206,22 @@ private struct TrafficLights: View {
     }
 
     static func package(routed: Bool, now: Date) throws -> PackageProtectionStatus {
-        try decode(PackageProtectionStatus.self, #"{"configured":true,"routed":\#(routed),"active":\#(routed),"busy":false,"stale":false,"summary":"","generated_at":"\#(iso(now.addingTimeInterval(-5 * 3600)))","update_error":null}"#)
+        try decode(PackageProtectionStatus.self, #"{"configured":true,"routed":\#(routed),"active":\#(routed),"busy":false,"stale":false,"summary":"","generated_at":"\#(iso(now.addingTimeInterval(-5 * 3600)))","update_error":null,"exceptions":[{"ecosystem":"npm","package":"node-ipc-relay","version":"10.1.3","added":"\#(iso(now.addingTimeInterval(-2 * 86_400)))"},{"ecosystem":"PyPI","package":"fastapi-cache-tools","version":"0.4.0","added":"\#(iso(now.addingTimeInterval(-9 * 86_400)))"}],"exception_error":null}"#)
     }
     static func scripts(routed: Bool) throws -> ScriptProtectionStatus {
         try decode(ScriptProtectionStatus.self, #"{"routed":\#(routed),"active":\#(routed),"summary":"","blocked":[],"exceptions":[{"package":"electron","host":"github.com"},{"package":"esbuild","host":"registry.npmjs.org"}]}"#)
     }
     static func securityEvents(_ now: Date) -> [SecurityEvent] {
-        [SecurityEvent(id: "evt-install", time: now.addingTimeInterval(-260), layer: .installGate, outcome: .blocked,
+        [SecurityEvent(id: "evt-reported", time: now.addingTimeInterval(-75), layer: .installGate, outcome: .blocked,
+                       title: "Blocked install of color-string-fmt 2.1.4 (reported as malware)",
+                       reason: "This release is reported as malware by ghsa, but not yet confirmed. It was refused before npm downloaded it.",
+                       subject: "color-string-fmt@2.1.4", agent: "claude", command: "npm install color-string-fmt@2.1.4", package: "color-string-fmt",
+                       policyIDs: ["known-malicious-package"], ecosystem: "npm", version: "2.1.4", allowable: true),
+         SecurityEvent(id: "evt-install", time: now.addingTimeInterval(-260), layer: .installGate, outcome: .blocked,
                        title: "Blocked install of event-stream-utils 3.3.6",
-                       reason: "This exact release is on the known-malware feed. It was refused before npm downloaded it.",
+                       reason: "This exact release is confirmed malware. It was refused before npm downloaded it.",
                        subject: "event-stream-utils@3.3.6", agent: "claude", command: "npm install event-stream-utils", package: "event-stream-utils",
-                       policyIDs: ["known-malicious-package"]),
+                       policyIDs: ["known-malicious-package"], ecosystem: "npm", version: "3.3.6"),
          SecurityEvent(id: "evt-script", time: now.addingTimeInterval(-1500), layer: .containment, outcome: .blocked,
                        title: "Blocked a postinstall script from reaching collector.telemetry-cdn.example",
                        reason: "Install scripts run without network access. This script tried to open a connection that is not on the allowlist.",

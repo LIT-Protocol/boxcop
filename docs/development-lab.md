@@ -85,8 +85,8 @@ See [skill-security.md](skill-security.md), [software-exposure.md](software-expo
 
 - **A layer is "On" only while it enforces.** If a change can leave a layer
   routed but not answering, the state must say so.
-- **The model may tighten, never loosen.** No model output may approve, unblock
-  or change a policy. See [workflow-judgment.md](workflow-judgment.md).
+- **The model may tighten, never loosen.** No model output may allow an action,
+  lift a block or change a policy. See [workflow-judgment.md](workflow-judgment.md).
 - **Do not store what you do not need.** The decision audit holds no command
   text or file content. New logs hold names and hostnames, not payloads.
 - **Fail closed where a person asked for protection.** A stopped proxy makes

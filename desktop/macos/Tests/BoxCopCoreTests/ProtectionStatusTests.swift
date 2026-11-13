@@ -104,6 +104,26 @@ final class ProtectionStatusTests: XCTestCase {
         XCTAssertEqual(LayerRules.smartTriage(engineAvailable: true, runtimeAvailable: true, wanted: true, setupState: "ready").state, .on)
     }
 
+    func testSmartTriageShowsTheEnginesSetupErrorAndWhetherTheModelIsDownloaded() {
+        func triage(wanted: Bool = true, state: String? = nil, message: String? = nil, downloaded: Bool? = nil, live: Bool = true) -> LayerStatus {
+            LayerRules.smartTriage(engineAvailable: true, runtimeAvailable: true, wanted: wanted, setupState: state, setupMessage: message,
+                                   modelDownloaded: downloaded, live: live)
+        }
+        let disk = "Not enough free disk space to download the triage model. It needs 6.8 GB free (a 2.7 GB download plus 4 GB left over) and 3.1 GB is available."
+        XCTAssertEqual(triage(state: "error", message: disk), LayerStatus(.smartTriage, .needsSetup, disk))
+        XCTAssertEqual(triage(state: "error").state, .needsSetup)
+        XCTAssertTrue(triage(state: "error").detail.hasPrefix("The model could not be downloaded or loaded."))
+        // A message is only shown for the error state.
+        XCTAssertEqual(triage(state: "ready", message: disk).detail, "The local model is ready.")
+        XCTAssertEqual(triage(wanted: false, downloaded: true).detail, "Turn on smart triage in BoxCop. The model is already downloaded.")
+        XCTAssertEqual(triage(wanted: false, downloaded: false).detail, "Turn on smart triage in BoxCop. The model is a 2.7 GB download on first use.")
+        // `BoxCop --status` cannot ask the running model, but it can say whether the model is on disk.
+        XCTAssertEqual(triage(downloaded: true, live: false), LayerStatus(.smartTriage, .on, "Turned on. The model is downloaded. It runs while BoxCop is open."))
+        XCTAssertEqual(triage(downloaded: false, live: false),
+                       LayerStatus(.smartTriage, .needsSetup, "Turned on, but the model is not downloaded yet. Open BoxCop to download it (2.7 GB)."))
+        XCTAssertEqual(triage(live: false).state, .on)
+    }
+
     func testAgentHookHealthFromEngineStates() {
         XCTAssertEqual(AgentHookHealth(state: "not_detected"), .notDetected)
         XCTAssertEqual(AgentHookHealth(state: "not configured"), .notConnected)

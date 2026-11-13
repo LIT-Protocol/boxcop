@@ -10,6 +10,7 @@ context only: nothing in it authorizes or blocks anything.
 | --- | --- | --- |
 | Network extension | Event ID and time, destination, hostname when macOS supplies one, sanitized URL, process, ancestry and signing identity, the decision and, for a block, the threat-list reason | New flows only. No payloads or byte counts, and no proof that data was transferred. Needs the network extension to be enabled. |
 | Agent hooks | The agent, the kind of action, reported run and call identifiers and the decision | Only connected agents. A pre-action hook does not see whether the action completed. What an agent reports about itself is not verified. |
+| Engine security events | The rows of the engine's `security_events` list: install gate blocks, refused connections from contained scripts, and agent hook denials, each with its layer, title, reason and subject. Each enters the packet as an event of kind `security_event` from the collector `engine`, with the ID `engine:` followed by the security event's ID. | Only what the engine blocked. Names, versions and hostnames, never payloads or file content. |
 | Software inventory | Up to 128 observations with name, version, path and advisory state | A snapshot of installed software, not evidence of execution. |
 
 Missing permissions, layers that are off, hooks that have not been called,
@@ -42,6 +43,10 @@ through the `workflow_context` pipe operation at most once every three seconds.
 The engine keeps only the latest packet, in memory, and treats it as expired
 after 15 seconds without a refresh. `workflow_clear` drops it and any review in
 progress.
+
+A finding from the model must cite events in the packet. When it cites an
+`engine:` event, the app attaches the explanation to the matching row in the
+Events list.
 
 The engine's reply holds counts and signal identifiers, never event text. Two
 signals are computed without the model: `observed_domain_block`, for a network

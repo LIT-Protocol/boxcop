@@ -2,7 +2,7 @@
 import SwiftUI
 import BoxCopCore
 
-/// One list for every layer. Waiting approvals stay on top; the selected row explains itself below.
+/// One list for every layer, newest first. The selected row explains itself below.
 struct EventsView: View {
     @ObservedObject var model: AppModel
     @State private var copied: String?
@@ -18,7 +18,7 @@ struct EventsView: View {
             }
             .padding(.horizontal, 24).padding(.top, 22).padding(.bottom, 12)
             if all.isEmpty {
-                empty("Nothing has been blocked, held or flagged yet. Events appear here as soon as a layer steps in.")
+                empty("Nothing has been blocked or flagged yet. Events appear here as soon as a layer steps in.")
             } else if rows.isEmpty {
                 empty("No events match this search or filter.")
             } else {
@@ -98,31 +98,11 @@ struct EventsView: View {
     }
 
     private func row(_ event: FeedEvent, selected: Bool) -> some View {
-        Group {
-                if let approval = event.approvalID {
-                    HStack(spacing: 10) {
-                        Image(systemName: "pin.fill").font(.system(size: 10)).foregroundStyle(Palette.amber).frame(width: 66, alignment: .leading)
-                        VStack(alignment: .leading, spacing: 1) {
-                            Text(event.title).font(.system(size: 12.5, weight: .semibold)).lineLimit(1)
-                            if !event.subject.isEmpty {
-                                Text(event.subject).font(.system(size: 11, design: .monospaced)).foregroundStyle(Palette.quiet).lineLimit(1).truncationMode(.middle)
-                            }
-                        }
-                        .frame(maxWidth: .infinity, alignment: .leading)
-                        Button("Reject") { model.resolve(approvalID: approval, approve: false) }.buttonStyle(.quiet)
-                        Button("Approve") { model.resolve(approvalID: approval, approve: true) }.buttonStyle(.primary)
-                            .help("Asks you to authenticate on this Mac, then allows this exact command once.")
-                    }
-                    .padding(.horizontal, 24).frame(height: 44)
-                    .disabled(model.reviewBusy)
-                } else {
-                    EventLine(event: event).padding(.horizontal, 24).frame(height: 30)
-                }
-            }
-        .background(selected ? Palette.accent.opacity(0.12) : event.pinned ? Palette.amber.opacity(0.08) : Color.clear)
-        .contentShape(Rectangle())
-        .onTapGesture { model.selectedEventID = selected ? nil : event.id }
-        .accessibilityAddTraits(.isButton)
+        EventLine(event: event).padding(.horizontal, 24).frame(height: 30)
+            .background(selected ? Palette.accent.opacity(0.12) : Color.clear)
+            .contentShape(Rectangle())
+            .onTapGesture { model.selectedEventID = selected ? nil : event.id }
+            .accessibilityAddTraits(.isButton)
     }
 
     private func empty(_ text: String) -> some View {
@@ -139,6 +119,7 @@ struct EventDetail: View {
     let event: FeedEvent
     @ObservedObject var model: AppModel
     @Binding var copied: String?
+    @State private var confirming: PackageRelease?
 
     var body: some View {
         VStack(alignment: .leading, spacing: 0) {
@@ -181,13 +162,31 @@ struct EventDetail: View {
             }
             HStack(spacing: 8) {
                 ForEach(Array(event.actions.enumerated()), id: \.offset) { _, action in button(action) }
-                if let message = model.reviewError, event.pinned { Text(message).font(.system(size: 11.5)).foregroundStyle(Palette.red).lineLimit(1) }
-                else if case .allowForPackage = event.actions.first, let message = model.layerMessages[.containment] {
-                    Text(message).font(.system(size: 11.5)).foregroundStyle(Palette.quiet).lineLimit(1)
-                }
+                if let message = message { Text(message).font(.system(size: 11.5)).foregroundStyle(Palette.quiet).lineLimit(2) }
                 Spacer()
             }
             .padding(.horizontal, 24).padding(.vertical, 10)
+        }
+        .alert("Allow \(confirming?.package ?? "") \(confirming?.version ?? "")?", isPresented: Binding(get: { confirming != nil }, set: { if !$0 { confirming = nil } }),
+               presenting: confirming) { release in
+            Button("Cancel", role: .cancel) {}
+            Button("Allow this release") { model.allowRelease(release) }
+        } message: { release in
+            Text(Self.confirmation(release))
+        }
+    }
+
+    /// What allowing means, stated before anything changes.
+    static func confirmation(_ release: PackageRelease) -> String {
+        "\(release.package) \(release.version) is reported as malware but not confirmed. Allowing lets package managers install this exact release."
+    }
+
+    /// The outcome of the row's own action, next to its buttons.
+    private var message: String? {
+        switch event.layer {
+        case .installGate where event.release != nil && event.release == model.releaseChanged: return model.layerMessages[.installGate]
+        case .containment where event.exception != nil: return model.layerMessages[.containment]
+        default: return nil
         }
     }
 
@@ -200,10 +199,9 @@ struct EventDetail: View {
 
     @ViewBuilder private func button(_ action: FeedEvent.Action) -> some View {
         switch action {
-        case .approve:
-            Button(action.title) { if let id = event.approvalID { model.resolve(approvalID: id, approve: true) } }.buttonStyle(.primary).disabled(model.reviewBusy)
-        case .reject:
-            Button(action.title) { if let id = event.approvalID { model.resolve(approvalID: id, approve: false) } }.buttonStyle(.quiet).disabled(model.reviewBusy)
+        case let .allowRelease(release):
+            Button(action.title) { confirming = release }.buttonStyle(.quiet)
+                .help("Lets npm, pnpm and pip install \(release.display). Every other release stays blocked.")
         case let .allowForPackage(package, host):
             Button(action.title) { model.allowScriptDestination(package: package, host: host) }.buttonStyle(.primary)
                 .help("Lets install scripts of \(package) reach \(host). Nothing else changes.")

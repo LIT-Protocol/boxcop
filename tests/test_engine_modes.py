@@ -17,7 +17,7 @@ from server.package_routing import enable as enable_registry
 from server.package_scripts import ScriptRuntime
 
 ROOT = Path(__file__).resolve().parents[1]
-CHECKS = {'rules', 'package_feed', 'registry_firewall', 'containment', 'approvals', 'inventory', 'triage'}
+CHECKS = {'rules', 'package_feed', 'registry_firewall', 'containment', 'inventory', 'triage'}
 
 
 def engine(*arguments, home):
@@ -50,12 +50,12 @@ def test_self_test_failure_is_nonzero_and_names_the_failed_check(monkeypatch, ca
     def broken(directory):
         raise RuntimeError('PRIVATE_FAILURE_DETAIL')
     monkeypatch.setattr(self_test, '_rules', broken)
-    monkeypatch.setattr(self_test, '_approvals', lambda directory: False)
+    monkeypatch.setattr(self_test, '_inventory', lambda: False)
     assert main(['--self-test']) == 1
     output = capsys.readouterr().out
     value = json.loads(output)
     assert value['ok'] is False and value['schema'] == 'boxcop.self-test.v1'
-    assert value['checks']['rules'] is False and value['checks']['approvals'] is False and value['checks']['triage'] is True
+    assert value['checks']['rules'] is False and value['checks']['inventory'] is False and value['checks']['triage'] is True
     assert 'PRIVATE_FAILURE_DETAIL' not in output
 
 

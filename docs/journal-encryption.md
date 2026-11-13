@@ -3,7 +3,7 @@
 Activity history is encrypted by the app before it is written to disk. This
 covers the activity journal, network connection history and network summary
 checkpoints. It does not encrypt all of BoxCop's storage: the decision audit
-database, the approval inbox, inventory caches, explicitly exported history and
+database, inventory caches, explicitly exported history and
 existing backup or snapshot copies are separate stores.
 
 ## Keys and records

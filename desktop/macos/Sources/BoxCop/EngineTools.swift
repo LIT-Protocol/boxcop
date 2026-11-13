@@ -36,6 +36,23 @@ enum EngineTools {
         return FileManager.default.isExecutableFile(atPath: runtime.path)
     }
     static var selfExecutable: String { Bundle.main.executablePath ?? CommandLine.arguments[0] }
+    /// Where the engine keeps the downloaded triage model. It is always under the home folder, whatever the data directory is.
+    static var modelDirectory: URL {
+        FileManager.default.homeDirectoryForCurrentUser.appendingPathComponent("Library/Application Support/BoxCop/models", isDirectory: true)
+    }
+    /// Bytes of model files on disk, or nil when there is no complete model. A partial download does not count as a model.
+    static func downloadedModelBytes(in directory: URL = modelDirectory) -> Int64? {
+        let keys: Set<URLResourceKey> = [.isRegularFileKey, .fileSizeKey]
+        guard let files = FileManager.default.enumerator(at: directory, includingPropertiesForKeys: Array(keys), options: [.skipsHiddenFiles]) else { return nil }
+        var total: Int64 = 0, complete = false
+        for case let file as URL in files {
+            guard let values = try? file.resourceValues(forKeys: keys), values.isRegularFile == true else { continue }
+            let size = Int64(values.fileSize ?? 0)
+            total += size
+            if file.pathExtension.lowercased() == "gguf", size >= 100_000_000 { complete = true }
+        }
+        return complete ? total : nil
+    }
 
     /// Runs the engine once and returns its standard output. Blocks the calling thread; never call it on the main thread from the app.
     static func run(_ arguments: [String], input: Data? = nil, timeout: TimeInterval? = 15, limit: Int = 2 * 1024 * 1024, requireSuccess: Bool = true) -> Data? {

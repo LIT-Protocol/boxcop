@@ -29,7 +29,7 @@ ACTIONS = {
     'codex': {'Bash': 'PreToolUse'},
     'cursor': {event: event for event in ('beforeShellExecution', *CURSOR_READ_EVENTS)},
 }
-MESSAGE = 'BoxCop held this action. Revise it to avoid sensitive data or unsafe execution, then submit the revised action. Do not retry through a different tool.'
+MESSAGE = 'BoxCop blocked this action. Revise it to avoid sensitive data or unsafe execution, then submit the revised action. Do not retry through a different tool.'
 
 
 def unique(pairs):
@@ -269,7 +269,7 @@ def cursor_imported_event(payload):
 
 def hook(harness, directory):
     allowed = False
-    explanation = 'BoxCop could not evaluate this action. Retry after checking BoxCop and its local audit storage. No action was approved.'
+    explanation = 'BoxCop could not evaluate this action. Retry after checking BoxCop and its local audit storage. The action was not run.'
     started = time.monotonic()
     tool = None
     receipt_harness = harness
@@ -298,16 +298,11 @@ def hook(harness, directory):
         # Deterministic rules only: no model downloads, inference or network calls.
         # SQLite's normal 10s busy wait exceeds vendor hook deadlines. A busy or
         # unavailable audit must produce an explicit deny before the harness times out.
-        from .human_review import gate
-        engine = Engine(_private_store(str(directory), timeout=.2), classifier=ContentClassifier(),
-                        action_gate=lambda: gate(directory, event, payload))
+        engine = Engine(_private_store(str(directory), timeout=.2), classifier=ContentClassifier())
         record = engine.evaluate(EventInput(**event))
         allowed = record.decision.action == 'allow'
         if not allowed:
-            explanation = ' '.join(record.decision.reasons)
-            if 'human-review-required' not in record.decision.policy_ids:
-                explanation += ' ' + MESSAGE
-                explanation += ' Reference: ' + record.id  # an approval hold already names its request
+            explanation = ' '.join(record.decision.reasons) + ' ' + MESSAGE + ' Reference: ' + record.id
         receipt(directory, receipt_harness, 'observed', tool=tool, decision=record.decision.action,
                 record_id=record.id, session_id=event['session_id'],
                 elapsed_ms=round((time.monotonic() - started) * 1000, 3))

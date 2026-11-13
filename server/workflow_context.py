@@ -5,6 +5,7 @@ No paths are opened, captured instructions executed, or decisions authorized her
 from copy import deepcopy
 from datetime import datetime
 import json
+import re
 from uuid import UUID
 from time import monotonic
 
@@ -12,11 +13,40 @@ SCHEMA = 'boxcop.workflow-context.v1'
 MAX_BYTES = 96 * 1024
 TEXT_FIELDS = ('instruction', 'arguments', 'result_summary')
 SENSITIVE = {'secret', 'private-key', 'ssn', 'medical', 'hr-sensitive', 'restricted-business'}
+# A row from the engine's own security_events list, placed in the timeline by the app
+# so the model can explain it. Its id is this prefix plus the row id, which is how a
+# finding that cites it is matched back to that row. Values are already redacted.
+ENGINE_KIND, ENGINE_COLLECTOR, ENGINE_PREFIX = 'security_event', 'BoxCopEngine', 'engine:'
+ENGINE_ID = re.compile(r'engine:[A-Za-z0-9-]{1,64}')
+ENGINE_FIELDS = {'layer': 32, 'outcome': 16, 'title': 300, 'reason': 600, 'subject': 512, 'agent': 64}
+ENGINE_OUTCOMES = ('blocked', 'warned')
 
 
 def _uuid(value):
     if not isinstance(value, str) or str(UUID(value)).lower() != value.lower():
         raise ValueError('Invalid ID')
+
+
+def _event_id(value):
+    """A collector event's UUID, or the id of an engine security event."""
+    if isinstance(value, str) and value.startswith(ENGINE_PREFIX):
+        if not ENGINE_ID.fullmatch(value):
+            raise ValueError('Invalid ID')
+    else:
+        _uuid(value)
+
+
+def _engine_event(event):
+    """The fixed shape of a security_event: what BoxCop did, about what, and why."""
+    fields = event['fields']
+    if event['collector'] != ENGINE_COLLECTOR or set(fields) - set(ENGINE_FIELDS) or not {'layer', 'outcome', 'title'} <= set(fields):
+        raise ValueError('Invalid security event')
+    for name, field in fields.items():
+        value = field.get('value')
+        if not isinstance(value, str) or not value.strip() or len(value) > ENGINE_FIELDS[name]:
+            raise ValueError('Invalid security event field')
+    if fields['outcome']['value'] not in ENGINE_OUTCOMES or not re.fullmatch(r'[a-z_]{1,32}', fields['layer']['value']):
+        raise ValueError('Invalid security event outcome or layer')
 
 
 def _text(value, limit=4096):
@@ -58,7 +88,7 @@ def validate_context(context):
                           'collector', 'provenance', 'availability', 'fields', 'relatedEventIDs'}
         if not isinstance(event, dict) or not required_event <= set(event) or set(event) - required_event - {'bundleID', 'pid', 'windowTitle'}:
             raise ValueError('Invalid event')
-        _uuid(event['id']); _uuid(event['sessionID'])
+        _event_id(event['id']); _uuid(event['sessionID'])
         if event['id'] in ids or event['sessionID'] != context['sessionID']:
             raise ValueError('Duplicate or foreign-session event')
         ids.add(event['id'])
@@ -82,11 +112,15 @@ def validate_context(context):
             if type(field['truncated']) is not bool: raise ValueError('Invalid truncation flag')
         if not isinstance(event['relatedEventIDs'], list) or len(event['relatedEventIDs']) > 16:
             raise ValueError('Invalid references')
-        for reference in event['relatedEventIDs']: _uuid(reference)
+        for reference in event['relatedEventIDs']: _event_id(reference)
+        if (event['kind'] == ENGINE_KIND) != event['id'].startswith(ENGINE_PREFIX):
+            raise ValueError('Security event identity mismatch')
+        if event['kind'] == ENGINE_KIND:
+            _engine_event(event)
     for link in context['links']:
         if not isinstance(link, dict) or set(link) != {'sourceEventID', 'targetEventID', 'relation', 'strength'}:
             raise ValueError('Invalid link')
-        _uuid(link['sourceEventID']); _uuid(link['targetEventID']); _text(link['strength'], 128)
+        _event_id(link['sourceEventID']); _event_id(link['targetEventID']); _text(link['strength'], 128)
         if link['sourceEventID'] not in ids or link['targetEventID'] not in ids:
             raise ValueError('Dangling link')
         if link['strength'] not in {'recorded_reference', 'shared_identifier', 'candidate'}:
@@ -95,7 +129,7 @@ def validate_context(context):
     for artifact in context['artifacts']:
         if not isinstance(artifact, dict) or not {'eventID', 'artifactID', 'mediaType', 'availability'} <= set(artifact) or set(artifact) - {'eventID', 'artifactID', 'mediaType', 'availability', 'localPath'}:
             raise ValueError('Invalid artifact')
-        _uuid(artifact['eventID'])
+        _event_id(artifact['eventID'])
         if artifact['eventID'] not in ids: raise ValueError('Dangling artifact')
         for name in ('artifactID', 'mediaType', 'availability'): _text(artifact[name], 128)
         if artifact.get('localPath') is not None: _text(artifact['localPath'])

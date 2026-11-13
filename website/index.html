@@ -75,20 +75,20 @@
             <div class="ev">
               <span class="tag tag-block">Blocked</span>
               <time>1:52 PM</time>
-              <p class="ev-t">Install script tried to reach an unapproved host</p>
+              <p class="ev-t">Install script tried to reach a host that is not allowed</p>
               <p class="ev-s">203.0.113.9 · Containment</p>
             </div>
             <div class="ev">
-              <span class="tag tag-hold">Held</span>
+              <span class="tag tag-block">Blocked</span>
               <time>11:30 AM</time>
-              <p class="ev-t">Held a command that reads SSH private keys</p>
+              <p class="ev-t">Blocked a command that reads SSH private keys</p>
               <p class="ev-s">Codex · Agent checks</p>
             </div>
             <div class="ev">
-              <span class="tag tag-ok">Approved</span>
+              <span class="tag tag-find">Finding</span>
               <time>10:07 AM</time>
-              <p class="ev-t">Approved once: delete the build output folder</p>
-              <p class="ev-s">Claude Code · Agent checks</p>
+              <p class="ev-t">An installed runtime has a known security issue</p>
+              <p class="ev-s">Node.js · Machine health</p>
             </div>
             <p class="day">Yesterday</p>
             <div class="ev">
@@ -166,7 +166,7 @@
         <span class="num">1</span>
         <p class="risk"><b>Risk</b> An agent installs something malicious, such as a compromised npm or PyPI release or a fake skill.</p>
         <h3>Install gate</h3>
-        <p>A local registry firewall checks each npm and PyPI download against a signed malware list and refuses listed releases. Skill and instruction files are checked for known bad patterns.</p>
+        <p>A local registry firewall checks each npm and PyPI download against a signed malware list and refuses listed releases, both confirmed malware and releases reported but not yet confirmed. The install fails in the terminal with an error that names BoxCop. Skill and instruction files are checked for known bad patterns.</p>
       </li>
       <li>
         <span class="num">2</span>
@@ -184,7 +184,7 @@
         <span class="num">4</span>
         <p class="risk"><b>Risk</b> An agent is steered by hostile content in a web page, document, email or tool result.</p>
         <h3>Agent checks</h3>
-        <p>Hooks in Claude Code, Codex and Cursor hold recognizable credential access, exfiltration and dangerous commands before they run. BoxCop does not detect the injection itself. It checks what the agent tries to do next.</p>
+        <p>Hooks in Claude Code, Codex and Cursor deny recognizable credential access, exfiltration and dangerous commands before they run. BoxCop does not detect the injection itself. It checks what the agent tries to do next.</p>
       </li>
       <li>
         <span class="num">5</span>
@@ -196,7 +196,7 @@
         <span class="num">6</span>
         <p class="risk"><b>Risk</b> Too many alerts, so the user turns everything off.</p>
         <h3>Smart triage</h3>
-        <p>A model that runs on your Mac explains held actions in plain language and reviews linked activity. It can add caution. It cannot grant access.</p>
+        <p>A model that runs on your Mac reviews linked activity, including what the other layers blocked, and explains events in plain language. It can add caution. It cannot grant access.</p>
       </li>
     </ol>
   </div>
@@ -293,8 +293,8 @@
         <tbody>
           <tr>
             <th scope="row">1. Install gate</th>
-            <td data-label="Built today">Local registry firewall that blocks listed malicious npm and PyPI releases using a signed malware feed. Opt-in routing for npm and pnpm. Skill and instruction-file checks.</td>
-            <td data-label="Current limits">No minimum release age. No pip or uv routing in the app. No checks for MCP servers or editor extensions. Skill checks match a narrow set of patterns.</td>
+            <td data-label="Built today">Local registry firewall that refuses npm and PyPI releases on a signed malware feed: confirmed malware, and releases reported as malware but not yet confirmed. A blocked version fails with an error that names BoxCop, and version ranges resolve to the highest clean version. Opt-in routing for npm and pnpm. Skill and instruction-file checks.</td>
+            <td data-label="Current limits">Reported releases include research and borderline packages, so a harmless release can be refused; you can allow one exact release from its event. Confirmed malware cannot be allowed. No minimum release age. No pip or uv routing in the app. No checks for MCP servers or editor extensions. Skill checks match a narrow set of patterns.</td>
           </tr>
           <tr>
             <th scope="row">2. Containment</th>
@@ -308,7 +308,7 @@
           </tr>
           <tr>
             <th scope="row">4. Agent checks</th>
-            <td data-label="Built today">Pre-action hooks for Claude Code, Codex and Cursor that hold recognizable credential access, exfiltration and dangerous commands. Optional approval inbox for sends and spending, confirmed with Mac authentication.</td>
+            <td data-label="Built today">Pre-action hooks for Claude Code, Codex and Cursor that deny recognizable credential access, exfiltration and dangerous commands.</td>
             <td data-label="Current limits">Hooks are cooperative: an effect hidden inside a script can get past them. No coverage of desktop agent apps. No prompt-injection detection.</td>
           </tr>
           <tr>
@@ -318,13 +318,13 @@
           </tr>
           <tr>
             <th scope="row">6. Smart triage</th>
-            <td data-label="Built today">A local model that explains held actions and reviews linked activity, citing what it found.</td>
-            <td data-label="Current limits">Advisory only. It does not yet choose which protections apply.</td>
+            <td data-label="Built today">A local model that reviews linked activity, including install gate, containment and agent check events, and explains events, citing what it found. One model runtime runs at a time, and the model can be removed in the app.</td>
+            <td data-label="Current limits">Advisory only. It does not yet choose which protections apply. The model is a 2.7 GB download, made only when the disk has room for it plus 4 GB, and uses about 3 GB of memory while running. Experimental.</td>
           </tr>
         </tbody>
       </table>
     </div>
-    <p class="note">BoxCop covers what it launches or routes, not every process on the Mac. Like any security tool, it can miss things and it can be wrong about a block. An open-source release is planned; the repository is private for now.</p>
+    <p class="note">BoxCop covers what it launches or routes, not every process on the Mac. Like any security tool, it can miss things and it can be wrong about a block. BoxCop is open source under the Apache 2.0 license. The source repository is not public yet.</p>
   </div>
 </section>
 
@@ -347,7 +347,7 @@
       <img src="assets/boxcop-mark.svg" alt="" width="30" height="30">
       <span>BoxCop</span>
     </a>
-    <p>Built by Lit Protocol</p>
+    <p>Built by Lit Protocol. Apache 2.0 licensed.</p>
     <a href="https://github.com/LIT-Protocol/boxcop">GitHub</a>
     <p class="yr">2026</p>
   </div>

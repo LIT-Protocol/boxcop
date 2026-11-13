@@ -26,7 +26,7 @@ class RuntimeTests(unittest.TestCase):
         for name, value in [('MODEL_BYTES', len(self.payload)), ('MODEL_SHA256', self.digest)]:
             patcher = patch.object(module, name, value); patcher.start(); self.addCleanup(patcher.stop)
         executable = self.root / 'llama-server'; executable.touch()
-        self.runtime = module.LocalInference(directory=self.root / 'models', executable=executable)
+        self.runtime = module.LocalInference(directory=self.root / 'models', executable=executable, reserve_bytes=0)
         self.addCleanup(self.runtime.close)
         self.target = self.runtime.directory / (self.digest + '.gguf')
 
@@ -52,7 +52,7 @@ class RuntimeTests(unittest.TestCase):
     def test_invalid_download_never_replaces_existing_file(self):
         self.runtime.directory.mkdir(); self.target.write_bytes(b'old invalid model')
         for payload, code in [(b'truncated', 0), (b'x' * len(self.payload), 0), (self.payload * 2, 0), (self.payload, 22)]:
-            with self.download(payload, code), self.assertRaises(ValueError): self.runtime._model()
+            with self.download(payload, code), self.assertRaises(module.SetupError): self.runtime._model()
             self.assertEqual(self.target.read_bytes(), b'old invalid model')
             self.assertFalse((self.runtime.directory / 'download.part').exists())
 
@@ -70,6 +70,129 @@ class RuntimeTests(unittest.TestCase):
         with patch.object(module.shutil, 'disk_usage', return_value=usage), patch.object(self.runtime, '_spawn') as spawn:
             with self.assertRaises(RuntimeError): self.runtime._model()
             spawn.assert_not_called()
+
+    def test_download_needs_the_model_size_plus_the_reserve_and_says_so(self):
+        from collections import namedtuple
+        Usage = namedtuple('Usage', 'free')
+        size, reserve = 2_740_937_888, 4_000_000_000
+        seen = []
+        def usage(path):
+            seen.append(path)
+            return Usage(self.free)
+        with patch.object(module, 'MODEL_BYTES', size):
+            runtime = module.LocalInference(directory=self.root / 'models', executable=self.root / 'llama-server', disk_usage=usage)
+            self.addCleanup(runtime.close)
+            self.assertEqual(runtime.reserve_bytes, reserve)  # The default: 4 GB left over.
+            self.free = size + reserve - 1
+            with patch.object(runtime, '_spawn') as spawn:
+                with self.assertRaises(module.SetupError): runtime.prepare()
+                spawn.assert_not_called()
+            self.assertEqual(seen, [runtime.directory])
+            self.assertEqual(runtime.status(), {'state': 'error', 'downloadedBytes': 0, 'totalBytes': size, 'message':
+                'Not enough free disk space to download the triage model. It needs 6.7 GB free '
+                '(a 2.7 GB download plus 4.0 GB left over) and 6.7 GB is available.'})
+            self.assertEqual(list(runtime.directory.glob('*.part')) + list(runtime.directory.glob('*.gguf')), [])
+            # Exactly enough is enough: the check passes and the download starts.
+            self.free = size + reserve
+            runtime._retry_at = 0
+            with patch.object(runtime, '_spawn', side_effect=RuntimeError('download started')) as spawn:
+                with self.assertRaises(RuntimeError): runtime.prepare()
+                spawn.assert_called_once()
+
+    def test_an_installed_model_needs_no_free_space(self):
+        self.runtime.directory.mkdir(); self.target.write_bytes(self.payload)
+        from collections import namedtuple
+        runtime = module.LocalInference(directory=self.runtime.directory, executable=self.root / 'llama-server',
+                                        disk_usage=lambda path: namedtuple('Usage', 'free')(0))
+        self.assertEqual(runtime._model(), self.target)
+
+    def test_second_process_cannot_start_the_model_while_one_runs_it(self):
+        import subprocess, sys, textwrap
+        self.runtime.directory.mkdir(); self.target.write_bytes(self.payload)
+        # Another process (the other engine) holds the runtime.
+        holder = subprocess.Popen([sys.executable, '-c', textwrap.dedent('''
+            import fcntl, os, sys
+            fd = os.open(sys.argv[1], os.O_CREAT | os.O_RDWR, 0o600)
+            fcntl.flock(fd, fcntl.LOCK_EX)
+            print("held", flush=True)
+            sys.stdin.read()
+        '''), str(self.runtime.directory / module.RUNTIME_LOCK)], stdin=subprocess.PIPE, stdout=subprocess.PIPE, text=True)
+        try:
+            self.assertEqual(holder.stdout.readline().strip(), 'held')
+            with patch.object(self.runtime, '_spawn', side_effect=AssertionError('A second runtime must not start')):
+                with self.assertRaises(module.SetupError): self.runtime.prepare()
+            self.assertEqual(self.runtime.status()['state'], 'error')
+            self.assertEqual(self.runtime.status()['message'],
+                             'Another copy of BoxCop is already running the triage model. Quit the other copy and try again.')
+            # Nothing can be deleted from under the running model either.
+            self.assertIsNone(module.remove_model(self.runtime.directory, patience=0))
+            self.assertTrue(self.target.exists())
+        finally:
+            holder.stdin.close(); holder.wait(timeout=5); holder.stdout.close()
+        # Once the other process is gone this one may run it.
+        self.runtime._retry_at = 0
+        started = []
+        def spawn(command, **kwargs):
+            started.append(kwargs['keep']); self.runtime._server = Process(code=None); self.runtime._server.pid = 4242
+            return self.runtime._server
+        with patch.object(self.runtime, '_spawn', side_effect=spawn), patch.object(self.runtime, '_request', return_value={'status': 'ok'}):
+            self.runtime.prepare()
+        self.assertEqual(len(started), 1)
+        self.assertEqual((self.runtime.directory / module.SERVER_LOCK).read_text(), '4242')
+        self.assertEqual(self.runtime.status()['state'], 'ready'); self.assertIsNone(self.runtime.status()['message'])
+        # Two runtimes in one process exclude each other the same way.
+        other = module.LocalInference(directory=self.runtime.directory, executable=self.root / 'llama-server', reserve_bytes=0)
+        self.addCleanup(other.close)
+        with patch.object(other, '_spawn', side_effect=AssertionError('A second runtime must not start')):
+            with self.assertRaises(module.SetupError): other.prepare()
+        self.assertEqual(other.status()['message'], module.BUSY)
+        self.runtime.close()
+        other._retry_at = 0
+        with patch.object(other, '_spawn', side_effect=spawn), patch.object(other, '_request', return_value={'status': 'ok'}):
+            other.prepare()
+
+    def test_a_runtime_that_outlived_its_engine_is_stopped_not_duplicated(self):
+        import os, signal, subprocess
+        self.runtime.directory.mkdir(); self.target.write_bytes(self.payload)
+        # A stand-in for llama-server left behind by an engine that died: it holds the
+        # server lock it inherited, and no engine holds the runtime lock.
+        program = self.root / 'llama-server'
+        program.unlink(); program.symlink_to('/bin/sleep')  # Runs under the name llama-server.
+        fd = module._lock(self.runtime.directory / module.SERVER_LOCK)
+        orphan = subprocess.Popen([str(program), '60'], pass_fds=(fd,))
+        os.pwrite(fd, str(orphan.pid).encode(), 0); os.close(fd)
+        try:
+            # Not ours to stop when it is some other program: the lock stays held and nothing starts.
+            with patch.object(self.runtime, 'executable', self.root / 'something-else'), \
+                 patch.object(module.time, 'monotonic', side_effect=iter(range(0, 1000, 3)).__next__):
+                with self.assertRaises(module.SetupError): self.runtime._claim()
+            self.assertIsNone(orphan.poll())
+            fd = self.runtime._claim()
+            os.close(fd)
+            self.assertEqual(orphan.wait(timeout=5), -signal.SIGKILL)
+        finally:
+            if orphan.poll() is None: orphan.kill()
+            orphan.wait()
+
+    def test_remove_model_deletes_only_model_files_and_reports_bytes(self):
+        self.assertEqual(module.remove_model(self.root / 'absent'), 0)
+        self.runtime.directory.mkdir(); self.target.write_bytes(self.payload)
+        (self.runtime.directory / 'download.part').write_bytes(b'12345')
+        (self.runtime.directory / 'notes.txt').write_bytes(b'keep')
+        self.assertEqual(module.remove_model(self.runtime.directory), len(self.payload) + 5)
+        self.assertEqual(sorted(p.name for p in self.runtime.directory.iterdir() if not p.name.endswith('.lock')), ['notes.txt'])
+        self.assertEqual(module.remove_model(self.runtime.directory), 0)
+        # While this process runs the model, or installs it, nothing is removed.
+        self.target.write_bytes(self.payload)
+        for name in (module.RUNTIME_LOCK, module.SERVER_LOCK, module.INSTALL_LOCK):
+            fd = module._lock(self.runtime.directory / name)
+            try:
+                self.assertIsNone(module.remove_model(self.runtime.directory, patience=0))
+                self.assertTrue(self.target.exists())
+            finally:
+                module.os.close(fd)
+        link = self.root / 'link'; link.symlink_to(self.runtime.directory)
+        self.assertEqual(module.remove_model(link), 0); self.assertTrue(self.target.exists())
 
     def test_symlink_lock_is_rejected(self):
         self.runtime.directory.mkdir(); marker = self.root / 'keep'; marker.write_bytes(b'untouched')
@@ -113,7 +236,7 @@ class RuntimeTests(unittest.TestCase):
             self.assertNotIn('LLAMA_ARG_MCP_SERVERS_JSON', kwargs['env'])
             self.assertNotIn('GGML_BACKEND_PATH', kwargs['env'])
             self.assertNotIn(self.runtime._key, ' '.join(command))
-            self.runtime._server = server
+            self.runtime._server = server; server.pid = 4242
             return server
         with patch.dict(module.os.environ, {'LLAMA_ARG_MCP_SERVERS_JSON': 'untrusted', 'GGML_BACKEND_PATH': '/untrusted'}), \
              patch.object(self.runtime, '_spawn', side_effect=spawn), patch.object(self.runtime, '_request', return_value={'status': 'ok'}):
@@ -125,6 +248,16 @@ class RuntimeTests(unittest.TestCase):
             with self.assertRaises(RuntimeError): self.runtime.prepare()
             self.assertEqual(install.call_count, 1)
         self.assertEqual(self.runtime.status()['state'], 'error')
+        self.assertEqual(self.runtime.status()['message'], module.FAILED)
         self.assertNotIn('private', json.dumps(self.runtime.status()))
+
+    def test_setup_messages_name_what_went_wrong(self):
+        missing = module.LocalInference(directory=self.root / 'models', executable=self.root / 'absent', reserve_bytes=0)
+        with self.assertRaises(module.SetupError): missing.prepare()
+        self.assertEqual(missing.status()['message'], 'The triage model runtime is missing from this copy of BoxCop.')
+        with self.download(b'truncated'), self.assertRaises(module.SetupError): self.runtime.prepare()
+        self.assertEqual(self.runtime.status()['message'],
+                         'The triage model download failed or did not verify. BoxCop will try again in a few minutes.')
+        self.assertIsNone(module.LocalInference(directory=self.root / 'models').status()['message'])
 
 if __name__ == '__main__': unittest.main()

@@ -46,8 +46,8 @@ class Record(StrictModel):
 POLICIES = [
     *SKILL_POLICIES,
     *[{"id": key, "name": name, "description": description, "action": action} for key, name, description, action in [
-        ("known-malicious-package", "Known malicious package", "Hold literal installation of confirmed malicious releases in the reviewed offline advisory snapshot.", "block"),
-        ("vulnerable-runtime", "Known vulnerable runtime", "Hold literal installation of upstream PHP releases predating reviewed security fixes.", "block"),
+        ("known-malicious-package", "Known malicious package", "Block literal installation of confirmed malicious releases in the reviewed offline advisory snapshot.", "block"),
+        ("vulnerable-runtime", "Known vulnerable runtime", "Block literal installation of upstream PHP releases predating reviewed security fixes.", "block"),
         ("unsupported-runtime", "Unsupported runtime", "Review obsolete PHP branches; maintained vendor backports require separate assessment.", "warn"),
         ("unresolved-runtime-version", "Unresolved runtime patch status", "Review PHP branch aliases and vendor versions without claiming a known vulnerability.", "warn"),
     ]],
@@ -60,8 +60,3 @@ POLICIES = [
     {"id": "credential-file-egress", "name": "Credential store egress", "description": "Block commands naming a conventional credential store (cloud credentials, SSH private keys, .netrc, .env) together with a network tool. Identity use such as ssh -i is excluded. Heuristic, not a shell parser.", "action": "block"},
     {"id": "credential-file-access", "name": "Credential store access", "description": "Warn when a command reads a conventional credential store locally; .env alone is excluded as routine development. Heuristic, not a shell parser.", "action": "warn"},
 ]
-
-# Review configuration lives in the approval inbox, not the rule toggles.
-REVIEW_POLICIES = [{"id": "human-review-required", "name": "Human approval required",
-                   "description": "A review rule you turned on holds a covered agent action until you approve it once.",
-                   "action": "block"}]

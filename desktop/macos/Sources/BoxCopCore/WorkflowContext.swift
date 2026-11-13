@@ -1,8 +1,8 @@
 import Foundation
 
 public struct WorkflowLink: Codable, Equatable, Sendable {
-    public let sourceEventID: UUID
-    public let targetEventID: UUID
+    public let sourceEventID: String
+    public let targetEventID: String
     public let relation: String
     public let strength: String
 }
@@ -17,7 +17,7 @@ public struct WorkflowSourceState: Codable, Equatable, Sendable {
 }
 
 public struct WorkflowArtifact: Codable, Equatable, Sendable {
-    public let eventID: UUID
+    public let eventID: String
     public let artifactID: String
     public let mediaType: String
     public let localPath: String?
@@ -47,7 +47,7 @@ public struct WorkflowContext: Codable, Sendable {
         let recent = all.filter { $0.observedAt >= now.addingTimeInterval(-600) && $0.observedAt <= now.addingTimeInterval(5) }
         let count = max(1, min(maximumEvents, 64))
         // Keep a mix of inputs: a burst of network flows must not crowd out protection decisions.
-        var wanted = Set<UUID>()
+        var wanted = Set<String>()
         for event in recent.filter({ $0.kind == "security_event" }).suffix(32) where wanted.count < count { wanted.insert(event.id) }
         for event in recent.suffix(12) where wanted.count < count { wanted.insert(event.id) }
         for collector in Set(recent.map(\.collector)).sorted() {
@@ -100,8 +100,8 @@ public struct WorkflowContext: Codable, Sendable {
                         if a != nil && (a == b || a == responsible) {
                             relation = "nearby_process_context"; strength = "candidate"
                         } else if source.kind == "security_event", target.collector == "NetworkExtension",
-                                  let host = value(source, "host")?.lowercased(),
-                                  let destination = value(target, "hostname")?.lowercased(), host == destination {
+                                  let destination = value(target, "hostname")?.lowercased(),
+                                  let subject = value(source, "subject")?.lowercased(), EngineObservation.names(destination, in: subject) {
                             relation = "nearby_destination_context"; strength = "candidate"
                         }
                     }
@@ -112,7 +112,9 @@ public struct WorkflowContext: Codable, Sendable {
             }
             if links.count > 256 { issues.insert("link_budget_exceeded") }
             if sources.contains(where: { $0.state != "active" }) { issues.insert("collector_coverage_incomplete") }
-            return .init(schemaVersion: "boxcop.workflow-context.v1", contextID: selected.last?.id ?? timeline.sessionID,
+            // The context is named after its newest observation that has a UUID; engine decisions carry their own ids.
+            let named = selected.reversed().lazy.compactMap { UUID(uuidString: $0.id) }.first
+            return .init(schemaVersion: "boxcop.workflow-context.v1", contextID: named ?? timeline.sessionID,
                 sessionID: timeline.sessionID, revision: all.last?.sequence ?? 0, generatedAt: now,
                 events: selected, links: Array(links.suffix(256)), artifacts: [], sources: Array(sources.prefix(16)),
                 omittedEvents: all.count - selected.count, timelineDropped: timeline.dropped,
@@ -137,5 +139,75 @@ public struct WorkflowContext: Codable, Sendable {
         let encoder = JSONEncoder(); encoder.dateEncodingStrategy = .iso8601
         encoder.outputFormatting = [.sortedKeys]
         return try encoder.encode(self)
+    }
+}
+
+/// How an engine `security_events` row enters the triage timeline, and how a finding finds its way back to an Events row.
+public enum EngineObservation {
+    public static let prefix = "engine:"
+    public static let collector = "BoxCopEngine"
+    static let provenance = "engine_record"
+
+    /// `engine:<event id>`, which is also the id of the matching row in the Events list. Nil when the id cannot be cited safely.
+    public static func id(_ event: SecurityEvent) -> String? {
+        valid(event.id) ? prefix + event.id : nil
+    }
+    static func valid(_ raw: String) -> Bool {
+        (1...64).contains(raw.utf8.count) && raw.utf8.allSatisfy { ($0 >= 48 && $0 <= 57) || ($0 >= 65 && $0 <= 90) || ($0 >= 97 && $0 <= 122) || $0 == 45 }
+    }
+    /// True for an id a judgment may cite: a UUID or an engine event id.
+    public static func citable(_ id: String) -> Bool {
+        id.hasPrefix(prefix) ? valid(String(id.dropFirst(prefix.count))) : UUID(uuidString: id) != nil
+    }
+
+    /// Only what the Events row already shows. A value the engine did not report is left out, not sent as null.
+    public static func fields(_ event: SecurityEvent) -> [String: WorkflowField] {
+        var fields: [String: WorkflowField] = [:]
+        func set(_ name: String, _ value: String?, limit: Int) {
+            guard let value, !value.isEmpty else { return }
+            let scalars = value.unicodeScalars
+            fields[name] = WorkflowField(String(String.UnicodeScalarView(scalars.prefix(limit))), provenance: provenance, truncated: scalars.count > limit)
+        }
+        set("layer", event.layer.rawValue, limit: 32); set("outcome", event.outcome.rawValue, limit: 32)
+        set("title", event.title, limit: 300); set("reason", event.reason, limit: 600)
+        set("subject", event.subject, limit: 512); set("agent", event.agent, limit: 64)
+        return fields
+    }
+
+    /// Adds the decision to the timeline once. Returns its timeline id, or nil when it was skipped.
+    @discardableResult public static func append(_ event: SecurityEvent, to timeline: inout WorkflowTimeline) -> String? {
+        guard let id = id(event), !timeline.events.contains(where: { $0.id == id }) else { return nil }
+        return timeline.append(id: id, kind: "security_event", collector: collector, at: event.time, phase: "observed",
+                               provenance: provenance, fields: fields(event))
+    }
+
+    /// The Events row a timeline observation belongs to: engine decisions by their own id, connections by the network event id.
+    public static func rowID(for event: WorkflowEvent) -> String? {
+        if event.kind == "security_event", event.id.hasPrefix(prefix) { return event.id }
+        if event.kind == "network_connection", let id = event.fields["network_event_id"]?.value { return "network:" + id }
+        return nil
+    }
+
+    /// One explanation per Events row, from the findings that cite it. `rows` maps timeline ids to row ids.
+    public static func explanations(_ findings: [WorkflowJudgmentStatus.Finding], rows: [String: String]) -> [String: String] {
+        var notes: [String: String] = [:]
+        for finding in findings {
+            let text = [finding.summary, finding.recommendation].map { $0.trimmingCharacters(in: .whitespacesAndNewlines) }.filter { !$0.isEmpty }.joined(separator: " ")
+            guard !text.isEmpty else { continue }
+            for id in finding.eventIDs {
+                // An engine decision is cited by the id of its own row, so it resolves even after the timeline has moved on.
+                guard let row = rows[id] ?? (id.hasPrefix(prefix) && citable(id) ? id : nil) else { continue }
+                if let existing = notes[row] { if !existing.contains(text) { notes[row] = existing + " " + text } }
+                else { notes[row] = text }
+            }
+        }
+        return notes
+    }
+
+    /// Whether `subject` names `host` as a whole host, e.g. `pkg@1.0 → host:443`.
+    static func names(_ host: String, in subject: String) -> Bool {
+        guard !host.isEmpty else { return false }
+        let allowed = CharacterSet.alphanumerics.union(CharacterSet(charactersIn: "-."))
+        return subject.components(separatedBy: allowed.inverted).contains(host)
     }
 }

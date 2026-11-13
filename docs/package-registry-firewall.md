@@ -2,7 +2,8 @@
 
 BoxCop blocks npm and PyPI releases that are listed as malicious, at the moment a
 package manager asks for them. It does this with a local registry proxy and a
-signed list of malicious releases.
+signed list of malicious releases. Releases the list marks as confirmed malware
+and releases it marks as reported but not yet confirmed are both refused.
 
 Routing is **opt-in**. BoxCop does not change package manager settings until you
 turn the install gate on in the app, and turning it off restores them.
@@ -17,6 +18,45 @@ The registry firewall decides which releases may be downloaded. What an allowed
 package's install scripts may connect to is covered by
 [install script protection](install-script-protection.md).
 
+## What is blocked
+
+The signed list has two tiers. The proxy refuses both with HTTP 403.
+
+| Tier | Meaning | Error code | Can you allow it? |
+| --- | --- | --- | --- |
+| Confirmed malware | A source asserts the release is malicious and the feed marks it to block. | `BOXCOP_KNOWN_MALWARE` | No |
+| Reported as malware, not yet confirmed | A source has reported the release, and nobody has confirmed the report. | `BOXCOP_REPORTED_MALWARE` | Yes, one exact release at a time |
+
+Most of the feed is in the second tier, and most of that tier comes from OpenSSF.
+OpenSSF's records include security research packages and borderline reports, so
+blocking the tier means BoxCop will sometimes refuse a release that is not
+malware. We accept that trade-off because serving a reported release is worse
+than making a person look at it once. The exception exists for that case.
+
+**Allowing a reported release.** Open the block in Events and choose **Allow this
+release**. The exception covers one ecosystem, package name and exact version. It
+takes effect at once, without a restart, and the same install then succeeds.
+Exceptions are listed under Protections, where each can be removed; the release is
+blocked again from the next request. Confirmed malware and the test package below
+cannot be allowed, and an exception stops working if the feed later confirms the
+release.
+
+### How a block looks in the terminal
+
+A blocked version stays in the version list the proxy serves. It is marked
+deprecated (npm and pnpm) or yanked (PyPI) with a BoxCop message, and its download
+link points back at the proxy, which answers 403 with the BoxCop error code.
+
+| Request | Result |
+| --- | --- |
+| A range such as `^1.2.0`, or no version | The highest clean version in the range is installed. npm and pnpm prefer versions that are not deprecated, and pip skips yanked files. |
+| A tag such as `latest` that pointed at a blocked version | The tag points at the highest clean version instead. |
+| The exact blocked version, such as `pkg@1.2.3` or `pkg==1.2.3` | The install fails. The error names BoxCop and carries `BOXCOP_KNOWN_MALWARE` or `BOXCOP_REPORTED_MALWARE`. |
+| A package whose every version is blocked | The whole request is refused with the same 403. |
+
+Each refused download is recorded as a block in Events with the package, the
+version and the tier.
+
 ## Test it
 
 With the install gate on, run:
@@ -27,8 +67,9 @@ npm install boxcop-test-malware
 
 The install fails with the same response as a real listed package, and the block
 appears in the app's Events list. The package named `boxcop-test-malware` is
-always blocked, in npm and PyPI and at any version. It needs no feed entry and
-the request never reaches the public registry.
+always blocked, in npm and PyPI and at any version, with the code
+`BOXCOP_KNOWN_MALWARE`. It needs no feed entry, it cannot be allowed, and the
+request never reaches the public registry.
 
 ## Where the list comes from
 
@@ -63,19 +104,29 @@ three values change and nothing else does.
   provenance, source licensing, and retained report identifiers.
 - Ed25519-signed full replacement snapshots with an independently provisioned
   public key, atomic installation, sequence rollback checks, and last-good state.
-- Read-only public npm and PyPI proxy: remove blocked releases from metadata and
-  check authenticated artifact links again before downloading and streaming.
+- Read-only public npm and PyPI proxy: mark blocked releases in metadata as
+  deprecated or yanked, point their download links at a local 403, move tags to
+  the highest clean version, and check authenticated artifact links again before
+  downloading and streaming.
+- Local exceptions for exact releases of the reported tier, kept in a private,
+  validated, bounded file and applied without a restart.
 - Local `/status` reports policy availability, source fetch metadata, stale state,
   failed refreshes, and blocked-request count. Access logs do not retain package
   names or credentials. Only blocked responses contain the applicable report IDs.
 
 Unknown packages and new versions are allowed. Ordinary CVEs are not ingested as
-malware. OpenSSF includes research and borderline reports, so its records default
-to review-only; a publisher can explicitly approve MAL IDs after review. GitHub
-records with OpenSSF aliases/references retain that conservative disposition.
-Mirroring does not count as independent corroboration. Datadog and other GitHub
-malware records can block based on their own selectors. Unsupported selectors
-become review-only, never an inferred package-wide ban.
+malware.
+
+Which tier a record lands in is decided by the publisher. Datadog records and
+GitHub malware records that are not mirrors of OpenSSF are published as confirmed
+malware, based on their own selectors. OpenSSF includes research and borderline
+reports, so its records are published in the reported tier unless a publisher has
+reviewed the MAL ID and listed it (see `--reviewed-ids` below). GitHub records
+with OpenSSF aliases or references stay in the reported tier too: mirroring does
+not count as independent corroboration. A record whose selector is not supported
+goes to the reported tier and never becomes an inferred package-wide ban. The
+client refuses both tiers; the tier decides the error code and whether a local
+exception is possible.
 
 Datadog `null` entries explicitly designate malicious-intent package names and
 block all versions while that source assertion remains active. Version lists block
@@ -120,7 +171,8 @@ Optional flags:
 
 - `--openssf-dir PATH`: read a local directory of `MAL-*.json` OSV metadata instead
   of OSV bulk exports. No repository scripts or package samples are executed.
-- `--reviewed-ids FILE`: JSON list of explicitly reviewed MAL IDs eligible to block.
+- `--reviewed-ids FILE`: JSON list of MAL IDs a publisher has reviewed. Those
+  records are published as confirmed malware instead of reported.
 - `--full-github-refresh`: reconcile the API from scratch, including records
   deleted upstream. Run periodically (for example weekly); ordinary updates use
   the cursor and process withdrawals. A mirror can still lag the original source.
@@ -171,7 +223,9 @@ The list and the keys for local artifact links are kept under
 `~/Library/Application Support/BoxCop/package-protection/`. Keep this directory:
 it holds the last accepted sequence number, which is what stops an older list
 from being accepted. Blocked requests are logged there in `blocks.json` with the
-package name, version and reporting sources.
+package name, version and reporting sources. The releases you have allowed are
+kept beside it in `exceptions.json`, which holds at most 200 entries. A file that
+is not private to you or does not validate is read as no exceptions.
 
 ## Outages and coverage limits
 
@@ -215,7 +269,9 @@ python -m pytest -q tests/test_package_intelligence.py \
 
 The real npm/pip tests use only locally generated inert archives and a simulated
 upstream transport. They exercise allowed fresh releases, blocked direct and
-transitive installs, and an npm install-script marker that must never execute.
+transitive installs, an exact blocked version that must fail with the BoxCop code,
+a range and a `latest` tag that must resolve to the highest clean version, and an
+npm install-script marker that must never execute.
 Other tests cover signatures, wrong keys, rollback across restart, source
 withdrawals, range boundaries, ecosystem isolation, failed updates, forged artifact
 links, source pagination, and enrollment. No malware samples are downloaded.

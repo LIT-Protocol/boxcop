@@ -190,7 +190,7 @@ def test_hook_decisions_are_reported_as_security_events_over_the_pipe(tmp_path):
         assert set(reply) == {"version", "id", "ok", "result"} and set(reply["result"]) == {"events"}
         event, = reply["result"]["events"]  # The allowed action is not an event.
         assert set(event) == {"id", "time", "layer", "outcome", "title", "reason", "subject", "agent", "command",
-                              "package", "host", "policy_ids"}
+                              "package", "host", "policy_ids", "ecosystem", "version", "allowable"}
         assert event["layer"] == "agent_actions" and event["outcome"] == "blocked" and event["agent"] == "claude"
         assert event["title"] == "Blocked Claude Code from sending sensitive data"
         assert "command-sensitive-egress" in event["policy_ids"]
@@ -240,6 +240,23 @@ INVALID_REQUESTS = [
       for index, limit in enumerate((True, 0, -1, 201, 500, 1.0, "30", None, []))],
     pytest.param(request("package_protection"), "r1", id="missing-package-action"),
     pytest.param(request("package_protection", action="install"), "r1", id="bad-package-action"),
+    pytest.param(request("package_protection", action="allow"), "r1", id="allow-without-release"),
+    pytest.param(request("package_protection", action="allow", ecosystem="npm", package="a"), "r1", id="allow-without-version"),
+    pytest.param(request("package_protection", action="allow", ecosystem="gem", package="a", package_version="1.0.0"), "r1", id="allow-bad-ecosystem"),
+    pytest.param(request("package_protection", action="allow", ecosystem="pypi", package="a", package_version="1.0.0"), "r1", id="allow-lowercase-ecosystem"),
+    pytest.param(request("package_protection", action="allow", ecosystem=["npm"], package="a", package_version="1.0.0"), "r1", id="allow-array-ecosystem"),
+    pytest.param(request("package_protection", action="revoke", ecosystem="npm", package="", package_version="1.0.0"), "r1", id="revoke-empty-package"),
+    pytest.param(request("package_protection", action="revoke", ecosystem="npm", package="a" * 215, package_version="1.0.0"), "r1", id="revoke-long-package"),
+    pytest.param(request("package_protection", action="allow", ecosystem="npm", package="a", package_version=1), "r1", id="allow-number-version"),
+    pytest.param(request("package_protection", action="allow", ecosystem="npm", package="a", package_version="1" * 129), "r1", id="allow-long-version"),
+    pytest.param(request("package_protection", action="allow", ecosystem="npm", package="a", package_version="1.0.0", extra=1), "r1", id="allow-extra-field"),
+    pytest.param(dict(request("package_protection", action="allow", ecosystem="npm", package="a"), version="1.0.0"), "r1", id="allow-version-in-envelope"),
+    pytest.param(request("package_protection", action="status", ecosystem="npm", package="a", package_version="1.0.0"), "r1", id="status-with-release"),
+    pytest.param(request("package_protection", action=["allow"]), "r1", id="array-package-action"),
+    pytest.param(request("workflow_clear", remove_model="true"), "r1", id="remove-model-string"),
+    pytest.param(request("workflow_clear", remove_model=1), "r1", id="remove-model-number"),
+    pytest.param(request("workflow_clear", remove_model=None), "r1", id="remove-model-null"),
+    pytest.param(request("status", remove_model=True), "r1", id="remove-model-on-status"),
     pytest.param(request("script_protection", action="status"), "r1", id="missing-script-rule"),
     pytest.param(request("script_protection", action="trust", package="", host=""), "r1", id="bad-script-action"),
     pytest.param(request("script_protection", action="allow", package="a" * 256, host="example.com"), "r1", id="long-script-package"),
@@ -599,6 +616,11 @@ desktop.WorkflowJudge = lambda **kwargs: WorkflowJudge(model, interval=0, **kwar
 raise SystemExit(desktop.main())
 '''
     context = fixture()
+    main_directory, tmp_path = tmp_path, tmp_path / 'workflow-review'  # Only the reviewer sidecar has a judge.
+    with sidecar(main_directory) as client:
+        reply = client.send(request('workflow_context', context=context))['result']['workflow']
+        assert reply['judgment'] is None and reply['eventCount'] == 2
+        assert client.send(request('workflow_clear'))['result'] == {'workflowCleared': True}
     with sidecar(tmp_path, launcher=launcher) as client:
         for _ in range(20):
             reply = client.send(request('workflow_context', context=context))
@@ -727,3 +749,70 @@ raise SystemExit(main())
                 script.get(f'http://127.0.0.1:{port}/')
     finally:
         shutil.rmtree(root, ignore_errors=True)
+
+
+def test_package_exceptions_and_model_removal_over_the_pipe_operations(tmp_path):
+    """The dispatch layer passes a release to allow/revoke and reports removed model bytes."""
+    from server import desktop
+    from server.engine import Engine
+    from server.store import Store
+
+    class Runtime:
+        directory = tmp_path
+        def __init__(self): self.calls = []
+        def command(self, *arguments):
+            self.calls.append(arguments)
+            return {'exceptions': [], 'exception_error': None}
+
+    engine = Engine(Store(tmp_path / 'events.sqlite3'))
+    engine.package_runtime = Runtime()
+    def send(**fields):
+        line = (json.dumps({'version': 1, 'id': 'r1', **fields}) + '\n').encode()
+        return desktop._handle_line(line, engine)[0]
+    assert send(op='package_protection', action='status')['result'] == {'packageProtection': {'exceptions': [], 'exception_error': None}}
+    for action in ('allow', 'revoke'):
+        assert send(op='package_protection', action=action, ecosystem='PyPI', package='Some_Pkg', package_version='1.0')['ok']
+    assert engine.package_runtime.calls == [('status', None, None, None), ('allow', 'PyPI', 'Some_Pkg', '1.0'), ('revoke', 'PyPI', 'Some_Pkg', '1.0')]
+
+    # The main engine has no judge; clearing still works and can remove the model files.
+    assert engine.workflow_context.judge is None
+    engine.model_directory = tmp_path / 'models'
+    assert send(op='workflow_clear')['result'] == {'workflowCleared': True}
+    assert send(op='workflow_clear', remove_model=False)['result'] == {'workflowCleared': True}
+    assert send(op='workflow_clear', remove_model=True)['result'] == {'workflowCleared': True, 'modelRemoved': True, 'freedBytes': 0}
+    engine.model_directory.mkdir()
+    (engine.model_directory / 'abc.gguf').write_bytes(b'x' * 1234)
+    (engine.model_directory / 'download.part').write_bytes(b'x' * 10)
+    assert send(op='workflow_clear', remove_model=True)['result'] == {'workflowCleared': True, 'modelRemoved': True, 'freedBytes': 1244}
+    assert not list(engine.model_directory.glob('*.gguf'))
+    # A runtime held elsewhere: nothing is deleted and the reply says so.
+    from server import local_inference
+    (engine.model_directory / 'abc.gguf').write_bytes(b'x' * 5)
+    held = local_inference._lock(engine.model_directory / local_inference.RUNTIME_LOCK)
+    try:
+        started = time.monotonic()
+        assert send(op='workflow_clear', remove_model=True)['result'] == {'workflowCleared': True, 'modelRemoved': False, 'freedBytes': 0}
+        assert time.monotonic() - started < 10 and (engine.model_directory / 'abc.gguf').exists()
+    finally:
+        os.close(held)
+
+
+def test_only_the_reviewer_sidecar_can_have_a_model(tmp_path, monkeypatch):
+    """The main engine never constructs a judge, so it has nothing that could start a model."""
+    from server import desktop
+    built = []
+    class Judge:
+        def __init__(self, **kwargs): built.append(kwargs)
+        def close(self): built.append('closed')
+        def clear(self): pass
+    monkeypatch.setattr(desktop, 'WorkflowJudge', Judge)
+    monkeypatch.setattr(desktop, '_serve', lambda engine: built.append(engine.workflow_context.judge) or 0)
+    assert desktop.main(['--data-dir', str(tmp_path / 'BoxCop')]) == 0
+    assert built == [None]
+    built.clear()
+    assert desktop.main(['--data-dir', str(tmp_path / 'BoxCop' / 'workflow-review')]) == 0
+    assert len(built) == 3 and isinstance(built[1], Judge) and built[2] == 'closed'
+    import server
+    for name in ('engine', 'host_agents', 'package_runtime', 'package_proxy', 'package_scripts', 'security_events', 'containment'):
+        source = (Path(server.__file__).parent / (name + '.py')).read_text()
+        assert 'local_inference' not in source and 'LocalInference' not in source and 'llama' not in source, name

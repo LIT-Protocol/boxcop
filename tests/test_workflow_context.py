@@ -22,6 +22,21 @@ def fixture(count=2):
         omittedEvents=0, timelineDropped=0, issues=[], enforcement='context_only_not_authorization')
 
 
+def engine_event(context, identifier='3f2a9c0d1b7e4a55', **values):
+    """A security_events row as the app places it in the timeline."""
+    values = {'layer': 'install_gate', 'outcome': 'blocked', 'title': 'Blocked install of left-pad 1.0.1 (reported as malware)',
+              'reason': 'This release is reported as malware by github, but the report is not yet confirmed.',
+              'subject': 'left-pad@1.0.1', 'agent': 'claude', **values}
+    context['revision'] += 1
+    event = dict(id='engine:' + identifier, sessionID=context['sessionID'], sequence=context['revision'],
+        observedAt=context['generatedAt'], receivedAt=context['generatedAt'], kind='security_event', phase='observed',
+        collector='BoxCopEngine', provenance='engine_record', availability='available', relatedEventIDs=[],
+        fields={name: dict(value=value, provenance='engine_record', availability='available', truncated=False)
+                for name, value in values.items() if value is not None})
+    context['events'].append(event)
+    return event
+
+
 class FakeClassifier:
     def __init__(self): self.seen = []
     def labels(self, text):
@@ -89,6 +104,43 @@ class ContextTests(unittest.TestCase):
             invalid = deepcopy(original); mutate(invalid)
             with self.assertRaises(ValueError): store.accept(invalid, FakeClassifier())
             self.assertEqual(store.for_judgment(), original)
+
+    def test_engine_security_event_is_accepted_and_can_be_linked(self):
+        context = fixture(1)
+        record = engine_event(context, identifier='0b9c2f7e-1111-4222-8333-444455556666', agent=None, subject=None)
+        first = context['events'][0]
+        first['relatedEventIDs'] = [record['id']]
+        context['links'] = [dict(sourceEventID=first['id'], targetEventID=record['id'], relation='preceded', strength='candidate')]
+        context['artifacts'] = [dict(eventID=record['id'], artifactID='a', mediaType='text/plain', availability='available')]
+        self.assertIs(validate_context(context), context)
+        classifier = FakeClassifier()
+        result = WorkflowContextStore().accept(context, classifier)
+        self.assertEqual((result['eventCount'], result['linkCount']), (2, 1))
+        # Engine text is already redacted and is not one of the classified evidence fields.
+        self.assertEqual(classifier.seen, ['SYNTHETIC_PRIVATE_TEXT'])
+
+    def test_engine_security_event_shape_is_strict(self):
+        mutations = [
+            lambda c, e: e.update(id=str(uuid4())),                        # A security_event needs an engine id,
+            lambda c, e: e.update(kind='agent_tool_call'),                 # and an engine id needs that kind.
+            lambda c, e: e.update(id='engine:'), lambda c, e: e.update(id='engine:has space'),
+            lambda c, e: e.update(id='engine:' + 'a' * 65), lambda c, e: e.update(id='engine:a/b'),
+            lambda c, e: e.update(collector='agent.hook'),
+            lambda c, e: e['fields'].pop('layer'), lambda c, e: e['fields'].pop('outcome'), lambda c, e: e['fields'].pop('title'),
+            lambda c, e: e['fields']['outcome'].update(value='held'), lambda c, e: e['fields']['outcome'].update(value='approved'),
+            lambda c, e: e['fields']['layer'].update(value='Install Gate'),
+            lambda c, e: e['fields']['title'].update(value=''), lambda c, e: e['fields']['title'].update(value='x' * 301),
+            lambda c, e: e['fields']['reason'].update(value='x' * 601),
+            lambda c, e: e['fields']['agent'].update(value=None),
+            lambda c, e: e['fields'].update(command=dict(value='rm -rf', provenance='p', availability='available', truncated=False)),
+            lambda c, e: c['events'].append(dict(e)),                      # The same row twice.
+            lambda c, e: c.update(links=[dict(sourceEventID='engine:missing', targetEventID=e['id'], relation='r', strength='candidate')]),
+        ]
+        for index, mutate in enumerate(mutations):
+            context = fixture(1); event = engine_event(context)
+            validate_context(deepcopy(context))
+            mutate(context, event)
+            with self.assertRaises(ValueError, msg=index): validate_context(context)
 
     def test_byte_budget_checks_utf8_not_character_count(self):
         context = fixture(20)

@@ -23,7 +23,7 @@ struct SettingsView: View {
                 toggleRow("Start BoxCop at login", model.loginMessage.isEmpty ? "Keeps protection on after a restart." : model.loginMessage,
                           Binding(get: { model.loginEnabled }, set: { model.setLoginEnabled($0) }))
                 RowDivider()
-                toggleRow("Notifications", model.notificationMessage.isEmpty ? "One notification when something is blocked or held, with a link to the event." : model.notificationMessage,
+                toggleRow("Notifications", model.notificationMessage.isEmpty ? "One notification when something is blocked, with a link to the event." : model.notificationMessage,
                           Binding(get: { model.notificationsEnabled }, set: { model.setNotifications($0) }))
                 if let updater = model.updater, updater.enabled {
                     RowDivider()

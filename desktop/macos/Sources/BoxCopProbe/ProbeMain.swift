@@ -26,14 +26,15 @@ import Darwin
             guard events == events.sorted(by: { $0.time > $1.time }) || Set(events.map(\.time)).count < events.count else { throw EngineFailure.protocolViolation }
             print("EVENTS_PASS: \(events.count) security events, newest first")
             var timeline = WorkflowTimeline()
-            let blocked = timeline.append(kind: "security_event", collector: "engine", provenance: "reported",
-                fields: ["layer": WorkflowField("install_gate"), "outcome": WorkflowField("blocked"), "host": WorkflowField("synthetic.example.test")])
+            let decision = SecurityEvent(id: "probe-synthetic", time: Date(), layer: .installGate, outcome: .blocked,
+                                         title: "Blocked install of synthetic-package 1.0.0", reason: "Synthetic probe.", subject: "synthetic-package@1.0.0")
+            guard let blocked = EngineObservation.append(decision, to: &timeline) else { throw EngineFailure.protocolViolation }
             timeline.append(kind: "network_connection", collector: "NetworkExtension", fields: [
                 "hostname": WorkflowField("synthetic.example.test"), "decision": WorkflowField("blocked_threat_domain")], relatedEventIDs: [blocked])
             let context = WorkflowContext.build(from: timeline, sources: [.init("network", "active", "synthetic probe")])
             guard case let .workflow(review) = try await engine.request(.workflowContext(context)),
                   review.eventCount == 2, review.shadowOnly,
-                  case .workflowCleared = try await engine.request(.workflowClear) else { throw EngineFailure.protocolViolation }
+                  case .workflowCleared = try await engine.request(.workflowClear()) else { throw EngineFailure.protocolViolation }
             print("WORKFLOW_PASS: linked context accepted and cleared")
             guard case .stopped = try await engine.request(.shutdown) else { throw EngineFailure.protocolViolation }
             await engine.stop()

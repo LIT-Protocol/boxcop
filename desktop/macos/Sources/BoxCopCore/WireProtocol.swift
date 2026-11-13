@@ -1,13 +1,67 @@
 import Foundation
 
-public enum PackageProtectionAction: String, Sendable { case status, enable, disable }
+public enum PackageProtectionAction: String, Sendable { case status, enable, disable, allow, revoke }
+/// One exact release of one package. The install gate allows or blocks releases, never whole packages.
+public struct PackageRelease: Decodable, Sendable, Hashable {
+    public static let ecosystems: Set<String> = ["npm", "PyPI"]
+    /// The request envelope already uses `version` for the protocol number, so a request names the release version with this key.
+    static let versionKey = "package_version"
+    public let ecosystem: String, package: String, version: String
+    public init(ecosystem: String, package: String, version: String) {
+        self.ecosystem = ecosystem; self.package = package; self.version = version
+    }
+    public init(from decoder: Decoder) throws {
+        let c = try decoder.container(keyedBy: WireKey.self)
+        ecosystem = try c.field("ecosystem"); package = try c.field("package")
+        version = try c.decodeIfPresent(String.self, forKey: WireKey("version")) ?? c.field(Self.versionKey)
+    }
+    /// What a person would type: `name@1.2.3` for npm, `name==1.2.3` for PyPI.
+    public var display: String { package + (ecosystem == "PyPI" ? "==" : "@") + version }
+    var isValid: Bool {
+        Self.ecosystems.contains(ecosystem) && !package.isEmpty && package.count <= 214 && !version.isEmpty && version.count <= 128
+    }
+}
+/// A release the person chose to allow although the feed reports it as malware. Confirmed malware can never be listed here.
+public struct PackageException: Decodable, Sendable, Hashable, Identifiable {
+    public let release: PackageRelease
+    /// ISO 8601 time the exception was added, when the engine reports it.
+    public let added: String?
+    public var id: String { release.ecosystem + "|" + release.package + "|" + release.version }
+    public init(release: PackageRelease, added: String? = nil) { self.release = release; self.added = added }
+    public init(from decoder: Decoder) throws {
+        let release = try PackageRelease(from: decoder)
+        guard release.isValid else { throw EngineFailure.protocolViolation }
+        self.release = release
+        added = try decoder.container(keyedBy: WireKey.self).decodeIfPresent(String.self, forKey: WireKey("added")).map { String($0.prefix(40)) }
+    }
+}
+/// An engine that predates exceptions omits the list; a malformed row is skipped, not the whole status.
+private struct LossyPackageException: Decodable {
+    let value: PackageException?
+    init(from decoder: Decoder) throws { value = try? PackageException(from: decoder) }
+}
 public struct PackageProtectionStatus: Decodable, Sendable {
     public let configured: Bool, routed: Bool, active: Bool, busy: Bool, stale: Bool
     public let summary: String
     public let generatedAt: String?, updateError: String?
+    public let exceptions: [PackageException]
+    /// Why the last `allow` or `revoke` was refused, in the engine's words. Nil when it was accepted.
+    public let exceptionError: String?
     enum CodingKeys: String, CodingKey {
-        case configured, routed, active, busy, stale, summary
-        case generatedAt = "generated_at", updateError = "update_error"
+        case configured, routed, active, busy, stale, summary, exceptions
+        case generatedAt = "generated_at", updateError = "update_error", exceptionError = "exception_error"
+    }
+    public init(from decoder: Decoder) throws {
+        let c = try decoder.container(keyedBy: CodingKeys.self)
+        configured = try c.decode(Bool.self, forKey: .configured); routed = try c.decode(Bool.self, forKey: .routed)
+        active = try c.decode(Bool.self, forKey: .active); busy = try c.decode(Bool.self, forKey: .busy)
+        stale = try c.decode(Bool.self, forKey: .stale); summary = try c.decode(String.self, forKey: .summary)
+        generatedAt = try c.decodeIfPresent(String.self, forKey: .generatedAt)
+        updateError = try c.decodeIfPresent(String.self, forKey: .updateError)
+        let rows = (try? c.decodeIfPresent([LossyPackageException].self, forKey: .exceptions)) ?? nil
+        exceptions = Array((rows ?? []).compactMap(\.value).prefix(200))
+        let refusal = ((try? c.decodeIfPresent(String.self, forKey: .exceptionError)) ?? nil)?.trimmingCharacters(in: .whitespacesAndNewlines)
+        exceptionError = refusal.flatMap { $0.isEmpty ? nil : String($0.prefix(300)) }
     }
 }
 
@@ -33,7 +87,7 @@ public struct ScriptProtectionStatus: Decodable, Sendable {
 /// One protection decision reported by the engine for layers 1, 2 and 4. Never carries secrets or file content.
 public struct SecurityEvent: Decodable, Identifiable, Equatable, Sendable {
     public enum Layer: String, Sendable { case installGate = "install_gate", containment, agentActions = "agent_actions" }
-    public enum Outcome: String, Sendable { case blocked, held, approved, rejected, warned }
+    public enum Outcome: String, Sendable { case blocked, warned }
     public let id: String
     public let time: Date
     public let layer: Layer
@@ -46,10 +100,23 @@ public struct SecurityEvent: Decodable, Identifiable, Equatable, Sendable {
     public let package: String?
     public let host: String?
     public let policyIDs: [String]
+    /// Install gate only: `npm` or `PyPI`, and the exact version that was refused.
+    public let ecosystem: String?
+    public let version: String?
+    /// True only for a release that is reported as malware but not confirmed, and is not already allowed.
+    public let allowable: Bool
     public init(id: String, time: Date, layer: Layer, outcome: Outcome, title: String, reason: String, subject: String,
-                agent: String? = nil, command: String? = nil, package: String? = nil, host: String? = nil, policyIDs: [String] = []) {
+                agent: String? = nil, command: String? = nil, package: String? = nil, host: String? = nil, policyIDs: [String] = [],
+                ecosystem: String? = nil, version: String? = nil, allowable: Bool = false) {
         self.id = id; self.time = time; self.layer = layer; self.outcome = outcome; self.title = title; self.reason = reason
         self.subject = subject; self.agent = agent; self.command = command; self.package = package; self.host = host; self.policyIDs = policyIDs
+        self.ecosystem = ecosystem; self.version = version; self.allowable = allowable
+    }
+    /// The exact release an install-gate event is about, when the engine named all three parts.
+    public var release: PackageRelease? {
+        guard layer == .installGate, let ecosystem, let package, let version else { return nil }
+        let release = PackageRelease(ecosystem: ecosystem, package: package, version: version)
+        return release.isValid ? release : nil
     }
     public init(from decoder: Decoder) throws {
         let c = try decoder.container(keyedBy: WireKey.self)
@@ -67,6 +134,14 @@ public struct SecurityEvent: Decodable, Identifiable, Equatable, Sendable {
         agent = try text("agent", limit: 32); command = try text("command", limit: 4096)
         package = try text("package", limit: 255); host = try text("host", limit: 255)
         policyIDs = Array((try c.decodeIfPresent([String].self, forKey: WireKey("policy_ids")) ?? []).prefix(32))
+        // Added with install gate exceptions; an older engine omits all three.
+        ecosystem = (try? text("ecosystem", limit: 16)) ?? nil
+        version = ((try? text("version", limit: 255)) ?? nil) ?? ((try? text(PackageRelease.versionKey, limit: 255)) ?? nil)
+        allowable = ((try? c.decodeIfPresent(Bool.self, forKey: WireKey("allowable"))) ?? nil) ?? false
+    }
+    /// True for the feed's unconfirmed tier: the release is reported as malware but nobody has confirmed it.
+    public var reportedOnly: Bool {
+        layer == .installGate && (allowable || title.localizedCaseInsensitiveContains("reported as malware"))
     }
     /// ISO 8601 with or without fractional seconds.
     public static func date(_ text: String) -> Date? {
@@ -84,9 +159,12 @@ private struct LossySecurityEvent: Decodable {
 }
 
 public enum EngineCommand: Sendable, CustomStringConvertible {
-    case packageProtection(PackageProtectionAction)
+    /// `allow` and `revoke` name one exact release; the other actions take none.
+    case packageProtection(PackageProtectionAction, release: PackageRelease? = nil)
     case scriptProtection(ScriptProtectionAction, package: String = "", host: String = "")
-    case status, securityEvents(Int), shutdown, workflowContext(WorkflowContext), workflowClear
+    case status, securityEvents(Int), shutdown, workflowContext(WorkflowContext)
+    /// Forgets the reviewer's context. With `removeModel` it also deletes the downloaded model, which the engine does only while the runtime is stopped.
+    case workflowClear(removeModel: Bool = false)
     public var operation: String {
         switch self {
         case .packageProtection: return "package_protection"
@@ -108,7 +186,16 @@ private struct Request: Encodable {
         try c.encode(1, forKey: WireKey("version")); try c.encode(id, forKey: WireKey("id"))
         try c.encode(command.operation, forKey: WireKey("op"))
         switch command {
-        case let .packageProtection(action): try c.encode(action.rawValue, forKey: WireKey("action"))
+        case let .packageProtection(action, release):
+            try c.encode(action.rawValue, forKey: WireKey("action"))
+            let names = action == .allow || action == .revoke
+            guard names == (release != nil), release?.isValid != false else { throw EngineFailure.invalidRequest }
+            if let release {
+                try c.encode(release.ecosystem, forKey: WireKey("ecosystem")); try c.encode(release.package, forKey: WireKey("package"))
+                try c.encode(release.version, forKey: WireKey(PackageRelease.versionKey))
+            }
+        case let .workflowClear(removeModel):
+            if removeModel { try c.encode(true, forKey: WireKey("remove_model")) }
         case let .scriptProtection(action, package, host):
             guard package.utf8.count <= 255, host.utf8.count <= 255 else { throw EngineFailure.invalidRequest }
             try c.encode(action.rawValue, forKey: WireKey("action"))
@@ -122,6 +209,12 @@ private struct Request: Encodable {
     }
 }
 
+/// The answer to `workflow_clear` with `remove_model`. `removed` is false when a runtime elsewhere still holds the model; nothing was deleted then.
+public struct ModelRemoval: Equatable, Sendable {
+    public let removed: Bool
+    public let freedBytes: Int64
+    public init(removed: Bool, freedBytes: Int64) { self.removed = removed; self.freedBytes = freedBytes }
+}
 /// What the readiness handshake reports about the engine's local listeners.
 public struct EngineStatus: Equatable, Sendable {
     public let packageRegistryListener: Bool
@@ -148,7 +241,9 @@ public struct WorkflowAssessment: Decodable, Sendable {
 public enum EngineResult: Sendable {
     case packageProtection(PackageProtectionStatus)
     case scriptProtection(ScriptProtectionStatus)
-    case status(EngineStatus), securityEvents([SecurityEvent]), stopped, workflow(WorkflowAssessment), workflowCleared
+    case status(EngineStatus), securityEvents([SecurityEvent]), stopped, workflow(WorkflowAssessment)
+    /// `removal` is reported only when the request asked for the model to be removed.
+    case workflowCleared(removal: ModelRemoval?)
     func matches(_ operation: String) -> Bool {
         switch (self, operation) {
         case (.packageProtection, "package_protection"), (.scriptProtection, "script_protection"), (.workflow, "workflow_context"),
@@ -226,9 +321,13 @@ private struct ResultPayload: Decodable {
                   (0...256).contains(assessment.linkCount) else { throw EngineFailure.protocolViolation }
             result = .workflow(assessment)
         } else if peek.contains(WireKey("workflowCleared")) {
-            let c = try decoder.object(["workflowCleared"])
-            guard try c.field("workflowCleared", as: Bool.self) else { throw EngineFailure.protocolViolation }
-            result = .workflowCleared
+            // `modelRemoved` and `freedBytes` come only with a request to remove the model.
+            guard Set(peek.allKeys.map(\.stringValue)).isSubset(of: ["workflowCleared", "modelRemoved", "freedBytes"]),
+                  try peek.field("workflowCleared", as: Bool.self) else { throw EngineFailure.protocolViolation }
+            let removed = try peek.decodeIfPresent(Bool.self, forKey: WireKey("modelRemoved"))
+            let freed = try peek.decodeIfPresent(Int64.self, forKey: WireKey("freedBytes"))
+            guard freed.map({ $0 >= 0 && $0 <= 100_000_000_000 }) ?? true else { throw EngineFailure.protocolViolation }
+            result = .workflowCleared(removal: removed.map { ModelRemoval(removed: $0, freedBytes: freed ?? 0) })
         } else {
             let c = try decoder.object(["stopped"])
             guard try c.field("stopped", as: Bool.self) else { throw EngineFailure.protocolViolation }

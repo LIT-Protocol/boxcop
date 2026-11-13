@@ -10,6 +10,14 @@ final class WorkflowJudgmentTests: XCTestCase {
             try JSONDecoder().decode(WorkflowJudgmentStatus.self, from: JSONSerialization.data(withJSONObject: status)).isValid
         }
         XCTAssertTrue(try valid())
+        XCTAssertNil(try JSONDecoder().decode(WorkflowJudgmentStatus.self, from: JSONSerialization.data(withJSONObject: status)).setup?.message)
+        let disk = "Not enough free disk space to download the triage model. It needs 6.8 GB free (a 2.7 GB download plus 4 GB left over) and 3.1 GB is available."
+        status["setup"] = ["state": "error", "downloadedBytes": 0, "totalBytes": 2740937888, "message": disk]
+        XCTAssertTrue(try valid())
+        XCTAssertEqual(try JSONDecoder().decode(WorkflowJudgmentStatus.self, from: JSONSerialization.data(withJSONObject: status)).setup?.message, disk)
+        status["setup"] = ["state": "ready", "downloadedBytes": 2740937888, "totalBytes": 2740937888, "message": NSNull()]
+        XCTAssertTrue(try valid())
+        XCTAssertNil(try JSONDecoder().decode(WorkflowJudgmentStatus.self, from: JSONSerialization.data(withJSONObject: status)).setup?.message)
         status["setup"] = ["state": "downloading", "downloadedBytes": -1, "totalBytes": 2740937888]
         XCTAssertFalse(try valid())
         status["setup"] = ["state": "unexpected", "downloadedBytes": 0, "totalBytes": 2740937888]
@@ -27,6 +35,18 @@ final class WorkflowJudgmentTests: XCTestCase {
             try JSONDecoder().decode(WorkflowJudgmentStatus.self, from: JSONSerialization.data(withJSONObject: value))
         }
         XCTAssertTrue(try decode(review).isValid)
+        // An engine decision is cited by `engine:<event id>`; nothing else that is not a UUID is accepted.
+        var cited = review["result"] as! [String: Any]
+        cited["evidenceEventIDs"] = [id, "engine:3f2a9c0d1b7e4a55"]
+        cited["findings"] = [["summary": "Blocked release", "recommendation": "Leave it blocked", "eventIDs": ["engine:3f2a9c0d1b7e4a55"]]]
+        var engine = review; engine["result"] = cited
+        let decoded = try decode(engine)
+        XCTAssertTrue(decoded.isValid)
+        XCTAssertEqual(decoded.result?.findings.first?.eventIDs, ["engine:3f2a9c0d1b7e4a55"])
+        cited["evidenceEventIDs"] = [id, "engine:not valid"]; cited["findings"] = []; engine["result"] = cited
+        XCTAssertFalse(try decode(engine).isValid)
+        cited["evidenceEventIDs"] = ["approval:rq-1"]; engine["result"] = cited
+        XCTAssertFalse(try decode(engine).isValid)
         review["advisoryOnly"] = false
         XCTAssertFalse(try decode(review).isValid)
         review["advisoryOnly"] = true

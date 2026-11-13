@@ -9,6 +9,7 @@ import hashlib
 import hmac
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 import json
+import re
 import threading
 from urllib.parse import quote, unquote, urlsplit
 
@@ -25,6 +26,12 @@ ARTIFACT_LIMIT = 1024 * 1024 * 1024
 TEST_PACKAGE = 'boxcop-test-malware'
 TEST_REPORT = {'source': 'boxcop', 'id': 'BOXCOP-SELF-TEST', 'url': 'https://github.com/LIT-Protocol/boxcop',
                'disposition': 'block'}
+# Two tiers are refused. A person can allow one exact release of the second.
+CODES = {'confirmed': 'BOXCOP_KNOWN_MALWARE', 'reported': 'BOXCOP_REPORTED_MALWARE'}
+# Shown by the package manager itself (npm `deprecated`, PyPI `yanked`) and in the 403 body.
+NOTICES = {'confirmed': 'Blocked by BoxCop: confirmed malware. Open BoxCop for details.',
+           'reported': 'Blocked by BoxCop: reported as malware, not yet confirmed. Open BoxCop for details.'}
+SEMVER = re.compile(r'(\d+)\.(\d+)\.(\d+)(?:-([0-9A-Za-z.-]+))?(?:\+[0-9A-Za-z.-]+)?')
 
 
 class Upstream:
@@ -54,21 +61,54 @@ def artifact_url(ecosystem, url):
     return parts._replace(fragment='').geturl()
 
 
+def semver_key(value):
+    """Sort key for an npm version, or None when it is not plain semver."""
+    match = SEMVER.fullmatch(value) if isinstance(value, str) else None
+    if not match:
+        return None
+    # A release sorts above its own pre-releases; numeric identifiers sort below text.
+    stage = (1,) if match[4] is None else (0, tuple(
+        (0, int(part), '') if part.isdigit() else (1, 0, part) for part in match[4].split('.')))
+    return int(match[1]), int(match[2]), int(match[3]), stage
+
+
+def replacement(refused, clean):
+    """The version a dist-tag moves to when it pointed at a refused release.
+
+    The highest clean release below the refused one, so a tag never jumps forward
+    past what its publisher chose; otherwise the highest clean release. Full
+    releases are preferred to pre-releases.
+    """
+    ranked = [(key, candidate) for candidate in clean if (key := semver_key(candidate))]
+    ranked = [row for row in ranked if row[0][3] == (1,)] or ranked
+    limit = semver_key(refused)
+    older = [row for row in ranked if limit and row[0] < limit]
+    return max(older or ranked)[1] if ranked else None
+
+
 class Firewall:
-    def __init__(self, store, secret, upstream=None, log=None):
+    def __init__(self, store, secret, upstream=None, log=None, exceptions=None):
         self.store, self.secret = store, secret
         self.upstream = upstream or Upstream()
         self.blocks = 0
         self.log = log
+        self.exceptions = exceptions
 
     def verdict(self, ecosystem, name, candidate):
-        """The policy decision, labelled with the release it is about."""
+        """The policy decision, labelled with the release it is about.
+
+        `refused` is None when the release may be served, else `confirmed` or
+        `reported`. Only a reported release can be let through, by an exact exception.
+        """
         if self_test(ecosystem, name):
             result = {'decision': 'block', 'reports': [dict(TEST_REPORT)], 'self_test': True}
         else:
             policy = self.store.policy
             result = policy.assess(ecosystem, name, candidate) if policy else {'decision': 'unknown', 'reports': []}
-        return dict(result, ecosystem=ecosystem, name=name, version=candidate)
+        refused = {'block': 'confirmed', 'review': 'reported'}.get(result['decision'])
+        if refused == 'reported' and self.exceptions is not None and self.exceptions.allows(ecosystem, name, candidate):
+            refused = None
+        return dict(result, ecosystem=ecosystem, name=name, version=candidate, refused=refused)
 
     def blocked(self, verdict):
         """Count a refused release and record it for the activity list."""
@@ -79,26 +119,28 @@ class Firewall:
         entry = dict(ecosystem=verdict.get('ecosystem'), package=verdict['name'][:214],
                      version=version[:128] if isinstance(version, str) else None,
                      sources=sorted({str(row.get('source'))[:32] for row in verdict['reports']})[:8],
-                     self_test=bool(verdict.get('self_test')))
+                     self_test=bool(verdict.get('self_test')),
+                     tier=verdict.get('refused') or 'confirmed')
         # One install asks for the same release several times; record it once.
-        self.log.append(entry, repeat_of='|'.join(str(entry[key]) for key in ('ecosystem', 'package', 'version')))
+        self.log.append(entry, repeat_of='|'.join(str(entry[key]) for key in ('ecosystem', 'package', 'version', 'tier')))
 
-    def hidden(self, verdicts):
-        """Record listed releases left out of a version list that still has safe ones.
+    def refusal_link(self, base, verdict, filename):
+        """A link on this listener that always answers 403 for a refused release.
 
-        The package manager then reports only that the version does not exist, so
-        the activity list is the one place that says why. Recorded once per release.
+        The error code is part of the path because some package managers print
+        only the URL of a failed download, not the response body.
         """
-        if self.log is None:
-            return
-        for verdict in list(verdicts)[:5]:
-            version = verdict.get('version')
-            if not isinstance(verdict.get('name'), str) or not isinstance(version, str):
-                continue
-            entry = dict(ecosystem=verdict.get('ecosystem'), package=verdict['name'][:214], version=version[:128],
-                         sources=sorted({str(row.get('source'))[:32] for row in verdict['reports']})[:8],
-                         self_test=False, hidden=True)
-            self.log.append(entry, repeat_of='|'.join(str(entry[key]) for key in ('ecosystem', 'package', 'version')), quiet=True)
+        return '/'.join([base, 'refused', CODES[verdict['refused']], verdict['ecosystem'],
+                         *(quote(part, safe='') for part in (verdict['name'], verdict['version'], filename))])
+
+    def refusal(self, path):
+        """The current verdict for a refusal link. The code in the path is not trusted."""
+        parts = path.split('/')
+        if len(parts) != 7 or parts[3] not in ('npm', 'PyPI'):
+            raise ValueError('Invalid refusal link')
+        name, candidate = package_name(parts[3], unquote(parts[4])), unquote(parts[5])
+        version(parts[3], candidate)
+        return self.verdict(parts[3], name, candidate)
 
     def link(self, base, ecosystem, name, candidate, url):
         name = package_name(ecosystem, name)
@@ -141,20 +183,28 @@ class Firewall:
             raise Blocked(self.verdict('npm', name, None))
         if requested:
             # Exact-version requests can be refused before even fetching metadata.
-            if self.verdict('npm', name, requested)['decision'] == 'block':
-                raise Blocked(self.verdict('npm', name, requested))
+            verdict = self.verdict('npm', name, requested)
+            if verdict['refused']:
+                raise Blocked(verdict)
         metadata = self.upstream.metadata('https://registry.npmjs.org/' + quote(name, safe=''))
         if metadata['name'] != name:
             raise ValueError('Package identity mismatch')
-        clean, blocked = {}, {}
+        versions, clean, blocked = {}, {}, {}
         for candidate, manifest in metadata['versions'].items():
             if manifest.get('name') != name or manifest.get('version') != candidate:
                 raise ValueError('Version identity mismatch')
             verdict = self.verdict('npm', name, candidate)
-            if verdict['decision'] == 'block':
-                blocked[candidate] = verdict
-                continue
             manifest = dict(manifest, dist=dict(manifest['dist']))
+            if verdict['refused']:
+                # A refused release stays listed, marked deprecated, so an exact request
+                # for it reaches a 403 that names BoxCop instead of "no matching version".
+                # npm and pnpm prefer releases that are not deprecated for ranges and tags.
+                blocked[candidate] = verdict
+                manifest['deprecated'] = NOTICES[verdict['refused']]
+                manifest['dist']['tarball'] = self.refusal_link(
+                    base, verdict, name.rsplit('/', 1)[-1] + '-' + candidate + '.tgz')
+                versions[candidate] = manifest
+                continue
             # npm's native registry-host replacement routes these URLs to this
             # listener at download time. Preserve public URLs in lockfiles.
             manifest['dist']['tarball'] = artifact_url('npm', manifest['dist']['tarball'])
@@ -162,8 +212,13 @@ class Firewall:
                 # pnpm omits its standard registry tarball URL from the lockfile,
                 # but unlike npm does not reroute explicit public tarball URLs.
                 manifest['dist']['tarball'] = base + prefix.rstrip('/') + urlsplit(manifest['dist']['tarball']).path
-            clean[candidate] = manifest
-        tags = metadata.get('dist-tags', {})
+            versions[candidate] = clean[candidate] = manifest
+        tags = {}
+        for tag, candidate in metadata.get('dist-tags', {}).items():
+            if candidate in blocked:
+                candidate = replacement(candidate, clean)
+            if candidate in clean:
+                tags[tag] = candidate
         if requested:
             selected = tags.get(requested, requested)
             if selected in blocked:
@@ -172,9 +227,8 @@ class Firewall:
                 raise Missing()
             return clean[selected]
         if not clean and blocked:
-            raise Blocked(dict(next(iter(blocked.values())), version=None))
-        self.hidden(blocked.values())
-        return dict(metadata, versions=clean, **{'dist-tags': {tag: candidate for tag, candidate in tags.items() if candidate in clean}})
+            raise Blocked(whole_package(blocked.values()))
+        return dict(metadata, versions=versions, **{'dist-tags': tags})
 
     def npm_artifact(self, path):
         """Bind canonical tarball paths to current registry metadata, not a
@@ -204,7 +258,7 @@ class Firewall:
             raise Missing()
         for item in candidates:
             verdict = self.verdict('npm', name, item['version'])
-            if verdict['decision'] == 'block':
+            if verdict['refused']:
                 raise Blocked(verdict)
         if len(candidates) != 1:
             raise ValueError('Ambiguous artifact identity')
@@ -217,7 +271,7 @@ class Firewall:
         metadata = self.upstream.metadata('https://pypi.org/simple/' + quote(name, safe='') + '/')
         if package_name('PyPI', metadata['name']) != name:
             raise ValueError('Package identity mismatch')
-        files, blocked = [], []
+        files, blocked, served = [], {}, 0
         for item in metadata['files']:
             filename = item['filename']
             try:
@@ -229,17 +283,21 @@ class Firewall:
                 raise ValueError('Distribution name mismatch')
             candidate = str(parsed[1])
             verdict = self.verdict('PyPI', name, candidate)
-            if verdict['decision'] == 'block':
-                blocked.append(verdict)
-                continue
             rewritten = {key: item[key] for key in ('filename', 'hashes', 'requires-python', 'yanked', 'size', 'upload-time') if key in item}
-            rewritten['url'] = self.link(base, 'PyPI', name, candidate, item['url'])
+            if verdict['refused']:
+                # PEP 592: pip skips a yanked file unless that version is pinned, and
+                # a pinned request then reaches the 403 that names BoxCop.
+                blocked[candidate] = verdict
+                rewritten['yanked'] = NOTICES[verdict['refused']]
+                rewritten['url'] = self.refusal_link(base, verdict, filename)
+            else:
+                served += 1
+                rewritten['url'] = self.link(base, 'PyPI', name, candidate, item['url'])
             # PEP 658 sidecars are deliberately not advertised: append-only
             # .metadata URLs would otherwise bypass authenticated artifact links.
             files.append(rewritten)
-        if not files and blocked:
-            raise Blocked(dict(blocked[0], version=None))
-        self.hidden({row['version']: row for row in blocked}.values())
+        if not served and blocked:
+            raise Blocked(whole_package(blocked.values()))
         return {'meta': {'api-version': '1.0'}, 'name': name, 'files': files}
 
 
@@ -248,6 +306,13 @@ def self_test(ecosystem, name):
         return package_name(ecosystem, name).lower() == TEST_PACKAGE
     except ValueError:
         return False
+
+
+def whole_package(verdicts):
+    """The verdict to report when no release of a package can be served."""
+    verdicts = list(verdicts)
+    # A lone release is named, so the block can be traced (and lifted) for that version.
+    return verdicts[0] if len(verdicts) == 1 else dict(verdicts[0], version=None)
 
 
 class Blocked(Exception):
@@ -302,6 +367,11 @@ class Handler(BaseHTTPRequestHandler):
             if self.path == '/status':
                 self.respond(200, dict(firewall.store.status(), blocked_requests=firewall.blocks,
                     scope='Public npm/PyPI requests routed through this proxy only'))
+            elif self.path.startswith('/refused/'):
+                verdict = firewall.refusal(self.path)
+                if verdict['refused']:
+                    raise Blocked(verdict)
+                self.respond(409, {'error': 'This release is no longer blocked. Run the install again.'})
             elif '/-/' in unquote(self.path):
                 self.artifact(firewall.npm_artifact(self.path))
             elif self.path.startswith(('/npm/', '/pnpm/')):
@@ -311,14 +381,15 @@ class Handler(BaseHTTPRequestHandler):
             elif self.path.startswith('/artifacts/'):
                 item = firewall.resolve(self.path)
                 verdict = firewall.verdict(item['ecosystem'], item['name'], item['version'])
-                if verdict['decision'] == 'block':
+                if verdict['refused']:
                     raise Blocked(verdict)
                 self.artifact(item)
             else:
                 self.respond(404, {'error': 'Unsupported registry endpoint'})
         except Blocked as error:
             firewall.blocked(error.verdict)
-            self.respond(403, {'error': 'BOXCOP_KNOWN_MALWARE', 'message': 'This package release is listed as malicious.',
+            tier = error.verdict.get('refused') or 'confirmed'
+            self.respond(403, {'error': CODES[tier], 'message': NOTICES[tier],
                 'reports': [{key: row[key] for key in ('source', 'id', 'url')} for row in error.verdict['reports']]})
         except Missing:
             self.respond(404, {'error': 'Release not found'})
@@ -341,7 +412,7 @@ class Handler(BaseHTTPRequestHandler):
             # Recheck after opening upstream; an update may have arrived while
             # waiting. Once streaming starts, already-sent bytes cannot be revoked.
             verdict = self.server.firewall.verdict(item['ecosystem'], item['name'], item['version'])
-            if verdict['decision'] == 'block':
+            if verdict['refused']:
                 raise Blocked(verdict)
             self.send_response(200)
             self.send_header('Content-Type', 'application/octet-stream')

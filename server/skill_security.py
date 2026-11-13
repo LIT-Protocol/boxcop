@@ -17,10 +17,10 @@ MAX_TOTAL_BYTES = 1024 * 1024
 POLICIES = [
     {'id': key, 'name': name, 'description': reason, 'action': 'block'}
     for key, name, reason in [
-        ('skill-instruction-override', 'Agent instruction override', 'Agent input contains a recognizable instruction to override higher-priority rules or disable safeguards. Review the source before use.'),
-        ('skill-concealed-action', 'Concealed agent action', 'Agent input asks to conceal actions from the user. Review the source before use.'),
-        ('skill-credential-egress', 'Skill credential exfiltration', 'Agent input combines a credential-store reference and a network tool. Review the source before use.'),
-        ('skill-remote-execution', 'Skill remote execution', 'Agent input contains a fetch/decode-to-execution or download-then-execute pattern. Review the source before use.'),
+        ('skill-instruction-override', 'Agent instruction override', 'Agent input contains a recognizable instruction to override higher-priority rules or disable safeguards. Check the source before use.'),
+        ('skill-concealed-action', 'Concealed agent action', 'Agent input asks to conceal actions from the user. Check the source before use.'),
+        ('skill-credential-egress', 'Skill credential exfiltration', 'Agent input combines a credential-store reference and a network tool. Check the source before use.'),
+        ('skill-remote-execution', 'Skill remote execution', 'Agent input contains a fetch/decode-to-execution or download-then-execute pattern. Check the source before use.'),
     ]
 ]
 OVERRIDE = re.compile(

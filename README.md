@@ -4,7 +4,7 @@ BoxCop is a Mac app for computers that run AI agents. Agents such as Claude Code
 Codex and Cursor work with your full access, and so does everything they install,
 download or write. BoxCop checks what agents install, contains what they run, and
 watches what leaves the machine. It runs locally, needs no account, and uploads
-nothing.
+nothing. It is licensed under Apache-2.0.
 
 **Let your AI agents work. Keep your machine protected.**
 
@@ -30,12 +30,12 @@ The product direction is described in
 
 | Risk | Layer | Built today | Current limits |
 | --- | --- | --- | --- |
-| An agent installs something malicious: a compromised npm or PyPI release, a fake skill | **1. Install gate** | A local registry proxy blocks npm and PyPI releases listed as malicious in a signed feed built from Datadog, OpenSSF and GitHub intelligence. Routing for npm and pnpm is opt-in. Skill and instruction files are checked for hostile patterns. | Only records the feed marks to block are refused, about a fifth of what it lists; the rest are allowed. A blocked version among good ones is hidden, so npm reports that it does not exist and the reason shows only in BoxCop. No minimum release age. No pip or uv routing in the app. No MCP server or extension checks. Skill checks are narrow patterns. |
-| Allowed code behaves badly when it runs: an install script sends credentials out | **2. Containment** | npm dependency install scripts run in a sandbox. Their only network path is a local proxy that allows approved hosts. Writes to shell and npm configuration are denied. Blocks are reported with the package and the agent that started the install. The same mechanism can run a single command contained from the command line. | Automatic only for npm install scripts. Agent-written scripts, downloaded binaries, MCP servers, pnpm, Yarn and Python installers are not contained automatically. Built on `sandbox-exec`, which Apple has deprecated. |
+| An agent installs something malicious: a compromised npm or PyPI release, a fake skill | **1. Install gate** | A local registry proxy refuses npm and PyPI releases listed in a signed feed built from Datadog, OpenSSF and GitHub intelligence. Both tiers are refused: confirmed malware, and releases reported as malware but not yet confirmed. A blocked version fails in the terminal with an error that names BoxCop, while ranges and tags resolve to the highest clean version. Routing for npm and pnpm is opt-in. Skill and instruction files are checked for hostile patterns. | The reported tier includes research and borderline packages, so a legitimate release can be refused; you can allow one exact release of that tier from its event. Confirmed malware cannot be allowed. No minimum release age. No pip or uv routing in the app. No MCP server or extension checks. Skill checks are narrow patterns. |
+| Allowed code behaves badly when it runs: an install script sends credentials out | **2. Containment** | npm dependency install scripts run in a sandbox. Their only network path is a local proxy that allows only hosts on its allowlist. Writes to shell and npm configuration are denied. Blocks are reported with the package and the agent that started the install. The same mechanism can run a single command contained from the command line. | Automatic only for npm install scripts. Agent-written scripts, downloaded binaries, MCP servers, pnpm, Yarn and Python installers are not contained automatically. Built on `sandbox-exec`, which Apple has deprecated. |
 | Data leaves through any app: a connection to a malware host | **3. Outbound control** | A network system extension records every app's new connections with process and signing identity, and blocks hostnames on a bundled threat list. | Reputation only. No per-app rules. No payload or secret inspection. The list updates only with app releases. Needs the signed build. |
-| An agent is steered by hostile content: prompt injection in a page, document or tool result | **4. Agent action checks** | Pre-action hooks for Claude Code, Codex and Cursor hold recognizable credential access, exfiltration and dangerous commands. The app shows whether each hook is installed and has been called. An optional approval inbox holds sends and spending until you approve with Mac authentication. | Cooperative: an effect hidden inside a script evades the hooks. No coverage of desktop agent apps. No prompt-injection detection. |
+| An agent is steered by hostile content: prompt injection in a page, document or tool result | **4. Agent action checks** | Pre-action hooks for Claude Code, Codex and Cursor deny recognizable credential access, exfiltration and dangerous commands. The app shows whether each hook is installed and has been called. | Allow or deny only: there is no way to let a denied action through once. Cooperative: an effect hidden inside a script evades the hooks. No coverage of desktop agent apps. No prompt-injection detection. |
 | The machine is already weak: outdated runtimes and apps | **5. Machine health** | An inventory of apps, Homebrew, Python, npm and runtimes, matched against reviewed findings. Guided updates for a few Homebrew formulae and Pillow. | Findings are hand-reviewed, not general CVE coverage. No Electron or Chromium runtime checks. No scan for plaintext secrets. |
-| Too many alerts, or protection applied blindly, so the user turns everything off | **6. Smart triage** | A bundled llama.cpp runtime with a local model explains held actions in plain language and reviews linked activity, returning concerns that cite the events they rest on. | Advisory only. It does not yet choose which protections apply. The model is a 2.7 GB download on first use. In the acceptance VM (8 GB) it ran the system out of memory; treat it as experimental. |
+| Too many alerts, or protection applied blindly, so the user turns everything off | **6. Smart triage** | A bundled llama.cpp runtime with a local model reviews linked activity: network history together with the install gate, containment and agent check events. It returns concerns that cite the events they rest on, and the explanation appears on those events. One model runtime runs at a time. | Advisory only. It does not yet choose which protections apply. The model is a 2.7 GB download on first use, and is not downloaded unless the disk has room for it plus 4 GB. It uses about 3 GB of memory while running. Not yet accepted in the VM lab; treat it as experimental. |
 
 [docs/layers.md](docs/layers.md) describes each layer, the files that implement it,
 and the reference tools we compare against.
@@ -64,7 +64,7 @@ Rules for the model:
 
 - **It may tighten protection on its own, never loosen it.** Loosening needs the
   user. The model reads attacker-controlled text, so a prompt injection must not be
-  able to grant access. In the code, no model output changes a policy, approves an
+  able to grant access. In the code, no model output changes a policy, allows an
   action or lifts a block.
 - **Local by default.** The inference runtime ships in the app and the model runs
   on this Mac.
@@ -72,8 +72,8 @@ Rules for the model:
 
 ## Install and build
 
-BoxCop has no public download yet. Build it from this repository on a Mac running
-macOS 14 or later with Xcode Command Line Tools, CMake and Python 3.12.
+BoxCop has no public download yet, and this repository is not public yet. With
+access to it, build BoxCop on a Mac running macOS 14 or later with Xcode Command Line Tools, CMake and Python 3.12.
 
 **Signed build with every layer.** This needs a Developer ID Application
 certificate, the two provisioning profiles and saved notarization credentials; see
@@ -122,7 +122,7 @@ Integrity Protection enabled, not on a developer's own Mac.
 
 | Path | Contents |
 | --- | --- |
-| `server/` | The Python engine: registry firewall, install script containment, agent hooks, approval inbox, software inventory and remediation, smart triage. Frozen into the app as `boxcop-engine`. |
+| `server/` | The Python engine: registry firewall, install script containment, agent hooks, software inventory and remediation, smart triage. Frozen into the app as `boxcop-engine`. |
 | `desktop/macos/` | The Swift app (`BoxCop`), shared core (`BoxCopCore`), network extension (`BoxCopNetworkFilter`), build scripts and resources. |
 | `tools/` | Command-line tools: malware feed publisher, skill scanner, software inventory. |
 | `tests/` | Python tests for the engine and the build pipeline. Swift tests live in `desktop/macos/Tests`. |
@@ -131,6 +131,7 @@ Integrity Protection enabled, not on a developer's own Mac.
 | `website/` | The product site. |
 | `brand/` | Icon and mark artwork. |
 | `build.sh` | The signed, notarized distribution build. |
+| `LICENSE`, `NOTICE` | The Apache-2.0 license text and the attribution notice. |
 | `update_from_feed.sh` | Daily review of public security feeds; see [docs/security-feed-review.md](docs/security-feed-review.md). |
 
 ## Principles
@@ -172,5 +173,15 @@ security teams. Our notes from installing and testing it are in
 
 ## License
 
-This repository is private and has no license yet. An open-source release is
-planned; the steps are on the [roadmap](docs/roadmap.md).
+BoxCop is licensed under the Apache License, Version 2.0. The text is in
+[LICENSE](LICENSE) and attribution is in [NOTICE](NOTICE).
+
+Bundled data and software keep their own licenses. In particular, the threat
+domain list used by outbound control is the HaGeZi Threat Intelligence Feeds list,
+licensed under GPL-3.0. It ships as a separate data file with its own license and
+notice in `desktop/macos/Resources/ThreatDomains/`, and is not part of the
+Apache-2.0 licensed code. The package malware intelligence, Sparkle, llama.cpp and
+the local model each carry their own license, listed in [NOTICE](NOTICE).
+
+The GitHub repository is still private. The license is in place; the remaining
+steps before the repository is opened are on the [roadmap](docs/roadmap.md).

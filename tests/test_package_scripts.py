@@ -231,6 +231,35 @@ def test_wrapper_and_profile_quote_unusual_paths():
     assert '(literal "/Users/a\\"b/.npmrc")' in rules and '(deny network*)' in rules
 
 
+@pytest.mark.skipif(not sandbox_available(), reason='needs macOS sandbox-exec')
+@pytest.mark.parametrize('contained_run', [False, True])
+def test_contained_code_cannot_allow_itself_past_the_install_gate(short, contained_run):
+    """The install gate's allowed releases live in BoxCop's own state, which neither
+    a contained install script nor a contained run can write."""
+    from server.containment import run_profile
+    from server.package_exceptions import Exceptions
+    home, state = short / 'home', short / 'BoxCop' / 'script-protection'
+    package_state = short / 'BoxCop' / 'package-protection'
+    for folder in (home, state, package_state):
+        folder.mkdir(parents=True)
+    exceptions = Exceptions(package_state)
+    exceptions.change('allow', 'npm', 'already-allowed', '1.0.0')
+    before = exceptions.path.read_bytes()
+    rules = run_profile(home, state, 1) if contained_run else profile(home, state)
+    assert '(subpath "' + str(package_state) + '")' in rules
+    forged = json.dumps([{'ecosystem': 'npm', 'package': 'evil', 'version': '6.6.6', 'added': '2026-11-12T00:00:00Z'}])
+    attempts = (f'printf %s {json.dumps(forged)!r} > "$P/exceptions.json"', 'rm "$P/exceptions.json"',
+                'mv "$P/exceptions.json" "$P/gone"', 'echo x > "$P/new-file"', f'printf %s {json.dumps(forged)!r} > "$O"; mv "$O" "$P/exceptions.json"')
+    for attempt in attempts:
+        result = subprocess.run(['/usr/bin/sandbox-exec', '-p', rules, '/bin/sh', '-c', attempt], capture_output=True, text=True, timeout=20,
+                                env={'P': str(package_state), 'O': str(short / 'outside.json'), 'PATH': '/usr/bin:/bin'})
+        assert result.returncode != 0, attempt
+        assert exceptions.path.read_bytes() == before and sorted(p.name for p in package_state.iterdir()) == ['exceptions.json', 'exceptions.json.lock']
+    assert not Exceptions(package_state).allows('npm', 'evil', '6.6.6')
+    # The same commands succeed uncontained, so the refusals above came from the sandbox.
+    assert subprocess.run(['/bin/sh', '-c', attempts[3]], env={'P': str(package_state)}).returncode == 0
+
+
 SCRIPT = '''
 const cp = require('child_process'), fs = require('fs');
 const base = process.env.BOXCOP_TEST_URL;

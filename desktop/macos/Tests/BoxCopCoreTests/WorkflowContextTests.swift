@@ -11,6 +11,12 @@ final class WorkflowContextTests: XCTestCase {
         event.process.pid = pid; event.process.uid = 501; event.process.incarnation = version
         return event
     }
+    func security(_ id: String, layer: SecurityEvent.Layer = .installGate, agent: String? = "claude", subject: String = "evil-pkg@1.2.3",
+                  reason: String = "This exact release is confirmed malware.", at offset: TimeInterval) -> SecurityEvent {
+        SecurityEvent(id: id, time: now.addingTimeInterval(offset), layer: layer, outcome: .blocked, title: "Blocked install of evil-pkg 1.2.3",
+                      reason: reason, subject: subject, agent: agent, command: "npm install evil-pkg", package: "evil-pkg", host: "collector.example",
+                      policyIDs: ["known-malicious-package"], ecosystem: "npm", version: "1.2.3")
+    }
     func page(_ events: [NetworkActivityEvent], after: UUID? = nil) -> NetworkWorkflowPage {
         .init(retained: events, after: after, loggingDropped: 0, writeFailures: 0, providerStartedAt: now)
     }
@@ -40,11 +46,10 @@ final class WorkflowContextTests: XCTestCase {
     func testExactProcessInstanceAndReportedAgentScopesRemainDistinct() {
         var importer = NetworkWorkflowImporter(), timeline = WorkflowTimeline()
         importer.ingest(page([event(0), event(1), event(2, version: 4)]), into: &timeline)
-        func decision(_ agent: String, at offset: TimeInterval) -> UUID {
-            timeline.append(kind: "security_event", collector: "engine", at: now.addingTimeInterval(offset), provenance: "reported",
-                            fields: ["agent": WorkflowField(agent, provenance: "reported"), "outcome": WorkflowField("blocked")])
+        func decision(_ id: String, _ agent: String, at offset: TimeInterval) -> String {
+            EngineObservation.append(security(id, agent: agent, at: offset), to: &timeline)!
         }
-        let first = decision("claude", at: 0), second = decision("claude", at: 3), other = decision("cursor", at: 4)
+        let first = decision("d1", "claude", at: 0), second = decision("d2", "claude", at: 3), other = decision("d3", "cursor", at: 4)
         let context = WorkflowContext.build(from: timeline, sources: [], now: now.addingTimeInterval(5))
         XCTAssertEqual(context.links.filter { $0.relation == "same_kernel_process_instance" }.count, 1)
         XCTAssertTrue(context.links.contains { $0.sourceEventID == first && $0.targetEventID == second && $0.relation == "same_agent_reported" })
@@ -53,8 +58,7 @@ final class WorkflowContextTests: XCTestCase {
     }
     func testNetworkBurstDoesNotCrowdOutProtectionDecisions() throws {
         var timeline = WorkflowTimeline()
-        let blocked = timeline.append(kind: "security_event", collector: "engine", at: now, provenance: "reported",
-            fields: ["layer": WorkflowField("install_gate"), "outcome": WorkflowField("blocked"), "package": WorkflowField("evil-pkg")])
+        let blocked = try XCTUnwrap(EngineObservation.append(security("blocked-1", at: 0), to: &timeline))
         var importer = NetworkWorkflowImporter()
         let events = (1...90).map { event($0) }
         importer.ingest(page(events), into: &timeline)
@@ -69,8 +73,8 @@ final class WorkflowContextTests: XCTestCase {
     func testBudgetsMissingReferencesAndNetworkOnlyPrivacy() throws {
         var timeline = WorkflowTimeline()
         for _ in 0..<30 {
-            timeline.append(kind: "security_event", collector: "engine", at: now,
-                fields: Dictionary(uniqueKeysWithValues: (0..<20).map { ("field\($0)", WorkflowField(String(repeating: "a", count: 4097))) }), relatedEventIDs: [UUID()])
+            timeline.append(kind: "app_context", collector: "synthetic", at: now,
+                fields: Dictionary(uniqueKeysWithValues: (0..<20).map { ("field\($0)", WorkflowField(String(repeating: "a", count: 4097))) }), relatedEventIDs: [UUID().uuidString])
         }
         var importer = NetworkWorkflowImporter(); importer.ingest(page([event(0)]), into: &timeline)
         let context = WorkflowContext.build(from: timeline, sources: [.init("network", "disabled_or_unavailable", "not available")], now: now)
@@ -83,7 +87,7 @@ final class WorkflowContextTests: XCTestCase {
     }
     func testWireUsesISO8601AndReportsUpstreamTruncation() throws {
         var timeline = WorkflowTimeline()
-        timeline.append(kind: "security_event", collector: "engine", at: now, provenance: "reported",
+        timeline.append(kind: "app_context", collector: "synthetic", at: now, provenance: "reported",
                         fields: ["command": WorkflowField("short clipped text", provenance: "reported", truncated: true)])
         let context = WorkflowContext.build(from: timeline, sources: [], now: now)
         let wire = try WireCodec.encode(id: "workflow", command: .workflowContext(context))
@@ -95,13 +99,84 @@ final class WorkflowContextTests: XCTestCase {
     }
     func testDecisionNetworkHostMatchIsOnlyCandidateAndTimeBounded() {
         var timeline = WorkflowTimeline(), importer = NetworkWorkflowImporter()
-        let decision = timeline.append(kind: "security_event", collector: "engine", at: now, provenance: "reported",
-            fields: ["host": WorkflowField("example.com", provenance: "reported")])
+        let decision = EngineObservation.append(security("script-1", subject: "left-pad@1.0.0 → example.com:443", at: 0), to: &timeline)!
+        // A host that merely ends with the same text is a different host.
+        let other = EngineObservation.append(security("script-2", agent: nil, subject: "left-pad@1.0.0 → notexample.com:443", at: 0), to: &timeline)!
         importer.ingest(page([event(2), event(20)]), into: &timeline)
         let context = WorkflowContext.build(from: timeline, sources: [], now: now.addingTimeInterval(21))
         let candidates = context.links.filter { $0.sourceEventID == decision }
         XCTAssertEqual(candidates.count, 1)
         XCTAssertEqual(candidates.first?.relation, "nearby_destination_context")
         XCTAssertEqual(candidates.first?.strength, "candidate")
+        XCTAssertFalse(context.links.contains { $0.sourceEventID == other })
+    }
+
+    func testEngineDecisionEntersTheTimelineInTheContractShape() throws {
+        var timeline = WorkflowTimeline()
+        let id = try XCTUnwrap(EngineObservation.append(security("3f2a9c0d1b7e4a55", reason: String(repeating: "r", count: 700), at: 0), to: &timeline))
+        XCTAssertEqual(id, "engine:3f2a9c0d1b7e4a55")
+        // The same decision is polled every few seconds; it is one observation.
+        XCTAssertNil(EngineObservation.append(security("3f2a9c0d1b7e4a55", at: 0), to: &timeline))
+        // An id that could not be cited back safely is left out rather than rewritten.
+        for bad in ["", "has space", "a/b", "é", String(repeating: "a", count: 65)] {
+            XCTAssertNil(EngineObservation.append(security(bad, at: 0), to: &timeline), bad)
+        }
+        XCTAssertNotNil(EngineObservation.append(security("no-agent", agent: nil, at: 1), to: &timeline))
+        XCTAssertEqual(timeline.events.count, 2)
+
+        let context = WorkflowContext.build(from: timeline, sources: [.init("engine", "active", "decisions")], now: now.addingTimeInterval(2))
+        let wire = try WireCodec.encode(id: "workflow", command: .workflowContext(context))
+        let payload = try XCTUnwrap((JSONSerialization.jsonObject(with: wire) as? [String: Any])?["context"] as? [String: Any])
+        // No observation has a UUID, so the context is named after the session.
+        XCTAssertEqual(payload["contextID"] as? String, timeline.sessionID.uuidString)
+        let events = try XCTUnwrap(payload["events"] as? [[String: Any]])
+        let event = try XCTUnwrap(events.first)
+        XCTAssertEqual(event["id"] as? String, "engine:3f2a9c0d1b7e4a55")
+        XCTAssertEqual(event["kind"] as? String, "security_event"); XCTAssertEqual(event["collector"] as? String, "BoxCopEngine")
+        XCTAssertEqual(event["phase"] as? String, "observed"); XCTAssertEqual(event["provenance"] as? String, "engine_record")
+        XCTAssertEqual(event["availability"] as? String, "available"); XCTAssertEqual(event["sessionID"] as? String, timeline.sessionID.uuidString)
+        XCTAssertEqual(event["relatedEventIDs"] as? [String], [])
+        XCTAssertNil(event["pid"]); XCTAssertNil(event["bundleID"]); XCTAssertNil(event["windowTitle"])
+        let fields = try XCTUnwrap(event["fields"] as? [String: [String: Any]])
+        // Only what the contract allows: no command, package, host or rule ids.
+        XCTAssertEqual(Set(fields.keys), ["layer", "outcome", "title", "reason", "subject", "agent"])
+        XCTAssertEqual(fields["layer"]?["value"] as? String, "install_gate"); XCTAssertEqual(fields["outcome"]?["value"] as? String, "blocked")
+        XCTAssertEqual(fields["title"]?["value"] as? String, "Blocked install of evil-pkg 1.2.3")
+        XCTAssertEqual(fields["subject"]?["value"] as? String, "evil-pkg@1.2.3"); XCTAssertEqual(fields["agent"]?["value"] as? String, "claude")
+        XCTAssertEqual((fields["reason"]?["value"] as? String)?.count, 600); XCTAssertEqual(fields["reason"]?["truncated"] as? Bool, true)
+        XCTAssertEqual(fields["title"]?["provenance"] as? String, "engine_record"); XCTAssertEqual(fields["title"]?["truncated"] as? Bool, false)
+        // A value the engine did not report is omitted, never sent as null.
+        let second = try XCTUnwrap(events.last?["fields"] as? [String: [String: Any]])
+        XCTAssertEqual(Set(second.keys), ["layer", "outcome", "title", "reason", "subject"])
+        XCTAssertTrue(second.values.allSatisfy { $0["value"] is String })
+    }
+    func testFindingsMapBackToEventsRows() throws {
+        var timeline = WorkflowTimeline(), importer = NetworkWorkflowImporter()
+        let decision = try XCTUnwrap(EngineObservation.append(security("evt-install", at: 0), to: &timeline))
+        let flow = event(1)
+        importer.ingest(page([flow]), into: &timeline)
+        var rows: [String: String] = [:]
+        for event in timeline.events { if let row = EngineObservation.rowID(for: event) { rows[event.id] = row } }
+        let connection = try XCTUnwrap(timeline.events.first { $0.kind == "network_connection" })
+        // The collector health note is context for the model, not a row in Events.
+        XCTAssertEqual(rows, [decision: "engine:evt-install", connection.id: "network:" + flow.id.uuidString])
+        XCTAssertEqual(decision, FeedEvent(security("evt-install", at: 0)).id)
+
+        typealias Finding = WorkflowJudgmentStatus.Finding
+        let notes = EngineObservation.explanations([
+            Finding(summary: "The agent asked for a release that is confirmed malware.", recommendation: "Check where the package name came from.",
+                    eventIDs: [decision, connection.id]),
+            Finding(summary: "The same process then tried a listed host.", recommendation: "", eventIDs: [connection.id, UUID().uuidString]),
+            // A decision that has left the timeline map still lands on its row; anything else unknown is dropped.
+            Finding(summary: "Earlier block.", recommendation: "Nothing to do.", eventIDs: ["engine:evt-older", "engine:not valid", "network:x"]),
+            Finding(summary: " ", recommendation: "", eventIDs: [decision])
+        ], rows: rows)
+        XCTAssertEqual(notes, [
+            "engine:evt-install": "The agent asked for a release that is confirmed malware. Check where the package name came from.",
+            "network:" + flow.id.uuidString: "The agent asked for a release that is confirmed malware. Check where the package name came from. The same process then tried a listed host.",
+            "engine:evt-older": "Earlier block. Nothing to do."])
+        // The explanation reaches the row the detail panel shows.
+        let feed = EventFeed.merge(security: [security("evt-install", at: 0)], network: [], findings: [], explanations: notes)
+        XCTAssertEqual(feed.first?.explanation, "The agent asked for a release that is confirmed malware. Check where the package name came from.")
     }
 }

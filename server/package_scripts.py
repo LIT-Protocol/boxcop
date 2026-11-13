@@ -182,7 +182,10 @@ def profile(home, directory, port=PORT, registry_port=REGISTRY_PORT):
     would disable this protection or start code later outside the sandbox."""
     home, directory = os.path.realpath(home), os.path.realpath(directory)
     files = ['.npmrc', '.zshenv', '.zshrc', '.zprofile', '.zlogin', '.bashrc', '.bash_profile', '.bash_login', '.profile']
-    folders = [directory, home + '/Library/LaunchAgents', home + '/.config/fish']
+    # BoxCop's own state: a script must not approve destinations for itself, replace the
+    # verified package list, or add itself to the releases allowed past the install gate.
+    folders = [directory, os.path.join(os.path.dirname(directory), 'package-protection'),
+               home + '/Library/LaunchAgents', home + '/.config/fish']
     return '\n'.join([
         '(version 1)', '(allow default)', '(deny network*)',
         f'(allow network-outbound (remote ip "localhost:{port}") (remote ip "localhost:{registry_port}"))',
@@ -228,7 +231,7 @@ def initiator(pid):
 class Guard:
     """Destination decisions for contained scripts. Thread-safe; bounded memory."""
     error = 'BOXCOP_INSTALL_SCRIPT_NETWORK'
-    refusal = 'BoxCop blocked this destination for package install scripts. Approve it in BoxCop if it is expected.'
+    refusal = 'BoxCop blocked this destination for package install scripts. Allow it in BoxCop if it is expected.'
 
     def __init__(self, directory, *, allow_private=False, ports=(80, 443), log=None):
         self.path = Path(directory) / 'exceptions.json'

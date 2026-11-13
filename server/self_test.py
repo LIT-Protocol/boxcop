@@ -61,13 +61,6 @@ def _containment(directory):
             and '(deny network*)' in run_profile(directory, directory, 1))
 
 
-def _approvals(directory):
-    from .human_review import DEFAULT_POLICIES, reasons
-    policies = dict(DEFAULT_POLICIES, spending=True)
-    held = reasons({'action': 'command', 'content': 'stripe charges create -d amount=999999 -d currency=usd'}, policies)
-    return bool(held) and not reasons({'action': 'command', 'content': 'git status'}, policies)
-
-
 def _inventory():
     from .software_inventory import Scan
     from .software_remediation import items
@@ -93,7 +86,7 @@ def main():
             return ok
         for name, check in (('rules', lambda: _rules(directory)), ('package_feed', feed),
                             ('registry_firewall', lambda: _firewall(state['store'])),
-                            ('containment', lambda: _containment(directory)), ('approvals', lambda: _approvals(directory)),
+                            ('containment', lambda: _containment(directory)),
                             ('inventory', _inventory), ('triage', _triage)):
             try:
                 checks[name] = check() is True

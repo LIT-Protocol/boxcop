@@ -177,3 +177,19 @@ swift build --package-path desktop/macos --product BoxCop
 BOXCOP_UPDATER_TEST_EXECUTABLE="$PWD/desktop/macos/.build/debug/BoxCop" \
   .venv/bin/python -m pytest -q tests/test_release.py -k packaged_sparkle_startup
 ```
+
+## Endpoint Security credential protection
+
+The network extension now also uses Endpoint Security. Its Developer ID profile
+must include `com.apple.developer.endpoint-security.client = true` for
+`local.sentinel.endpoint.network-filter`; older network-only profiles fail
+validation. Regenerate the profile after Apple's capability approval and supply
+it through `BOXCOP_NETWORK_PROFILE` (or `--network-profile`). Do not add the ES
+entitlement to the containing app. Run the signed VM acceptance gate in
+[credential-protection.md](credential-protection.md) before distributing this change.
+
+Local refreshed profiles are stored at `~/.sentinel-lab/profiles/` under the
+filenames used by `build.sh`. The GitHub Actions `BOXCOP_NETWORK_PROFILE_BASE64`
+secret must also contain the refreshed ES-enabled profile before a release build;
+updating the local file does not update that secret. Signed beta acceptance is
+recorded in [credential protection](credential-protection.md).

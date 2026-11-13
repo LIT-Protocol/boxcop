@@ -24,6 +24,10 @@ relying on it.
 See [protection layers](docs/layers.md) for implementation details and the
 [roadmap](docs/roadmap.md) for planned work.
 
+Endpoint Security credential protection is implemented as an opt-in beta in the
+combined system extension. It requires a refreshed provisioning profile and
+signed VM acceptance before release; see [coverage and setup](docs/credential-protection.md).
+
 ## Build from source
 
 Requires macOS 14 or later, Xcode Command Line Tools, CMake, and Python 3.12.

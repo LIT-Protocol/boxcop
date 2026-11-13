@@ -175,8 +175,10 @@ and Codex apps) are not covered. There is no prompt-injection detection.
 prompt injection with a small local model. Not built here. Next: a local injection
 classifier on content agents read.
 [Santa](https://github.com/northpolesec/santa) (permissive) for allowing or
-blocking binaries. Not built here: it needs the Endpoint Security entitlement,
-which BoxCop does not have.
+blocking binaries. Not built here. Apple has approved the Endpoint Security entitlement;
+credential protection is now integrated as an opt-in beta, pending signed VM acceptance.
+See [credential protection](credential-protection.md) for supported agents and limits. See the
+[Endpoint Security plan](../plans/endpoint-security.md) for progress and release prerequisites.
 
 ## 5. Machine health
 

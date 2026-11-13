@@ -11,6 +11,7 @@ struct ProtectionsView: View {
             ForEach(layers) { layer in
                 LayerCard(model: model, layer: layer) { content(layer) }
             }
+            CredentialProtectionDetails(network: model.network, paused: model.paused)
         }
     }
 
@@ -367,6 +368,51 @@ struct LayerTestSheet: View {
         .padding(.horizontal, 10).frame(height: 36)
         .background(Palette.sidebar, in: RoundedRectangle(cornerRadius: 6, style: .continuous))
         .overlay(RoundedRectangle(cornerRadius: 6, style: .continuous).strokeBorder(Palette.border))
+    }
+}
+#endif
+
+#if os(macOS)
+private struct CredentialProtectionDetails: View {
+    @ObservedObject var network: NetworkConnectionsModel
+    let paused: Bool
+    var body: some View {
+        VStack(alignment: .leading, spacing: 9) {
+            HStack {
+                Text("Credential protection · Beta").font(.system(size: 14, weight: .semibold))
+                Spacer()
+                Toggle("Credential protection", isOn: Binding(
+                    get: { network.credentials?.enabled ?? network.credentialProtectionWanted },
+                    set: { network.setCredentialProtection($0) }))
+                    .labelsHidden().toggleStyle(SwitchStyle())
+                    .disabled(network.busy || paused || !network.provisioning.available)
+            }
+            Text(network.credentials?.detail ?? (network.provisioning.available ? "Enable system protection to protect credential files. macOS will ask for extension approval and Full Disk Access." : "Requires a signed build with the Endpoint Security extension."))
+                .font(.system(size: 12.5)).fixedSize(horizontal: false, vertical: true)
+            Text("Covers signed Claude, Claude Code, Codex CLI and Cursor processes and tracked descendants. Restart agents after enabling. Unsigned tools and existing detached helpers may be unprotected. Credential APIs, inherited file handles and custom key locations are not covered. Newly replaced files accessed through aliases may be missed until the next index refresh.")
+                .font(.system(size: 11.5)).foregroundStyle(Palette.quiet)
+            if network.credentials?.state == "needsPermission" {
+                Button("Open Full Disk Access") { network.openFullDiskAccess() }.buttonStyle(.quiet)
+            }
+            if let status = network.credentials {
+                Text("\(status.blocked) reads blocked this session · \(status.unresolved) unresolved paths · \(status.responseFailures) response failures")
+                    .font(.system(size: 11.5)).foregroundStyle(Palette.quiet)
+                ForEach(Array(status.events.reversed().prefix(5))) { event in
+                    HStack {
+                        Text("Blocked \(URL(fileURLWithPath: event.process).lastPathComponent) from reading \(event.credential).")
+                            .font(.system(size: 12))
+                        Spacer()
+                        Button("Allow for 5 minutes") { network.allowCredentialRead(event.id) }
+                            .buttonStyle(.quiet).disabled(network.busy || paused)
+                            .help("Allows only this process incarnation and this file, not its children or other agents.")
+                    }
+                }
+            }
+            if !network.result.isEmpty { Text(network.result).font(.system(size: 12)).foregroundStyle(Palette.quiet) }
+        }
+        .padding(14).frame(maxWidth: .infinity, alignment: .leading)
+        .background(Palette.canvas).clipShape(RoundedRectangle(cornerRadius: 8))
+        .overlay(RoundedRectangle(cornerRadius: 8).strokeBorder(Palette.border))
     }
 }
 #endif

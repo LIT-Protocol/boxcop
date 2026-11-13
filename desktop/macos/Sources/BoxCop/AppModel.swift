@@ -26,7 +26,7 @@ struct Capabilities {
 
 /// One thing on Overview that is waiting for the person.
 struct NeedsYouItem: Identifiable {
-    enum Action { case openNetworkSettings, repairHooks, openHealth, restartEngine, fix(LayerID) }
+    enum Action { case openCredentialProtection, openNetworkSettings, repairHooks, openHealth, restartEngine, fix(LayerID) }
     let id: String
     let icon: String
     let text: String
@@ -215,10 +215,16 @@ struct NeedsYouItem: Identifiable {
         EventFeed.merge(security: securityEvents, network: network.snapshot?.events ?? [],
                         findings: wants(.machineHealth) ? findingItems : [], explanations: triageEnabled ? explanations : [:])
     }
-    var attentionNeeded: Bool { layers.contains { $0.state == .needsSetup } }
+    var credentialAttentionNeeded: Bool {
+        (network.credentials?.enabled ?? network.credentialProtectionWanted) && network.credentials?.state != "active"
+    }
+    var attentionNeeded: Bool { credentialAttentionNeeded || layers.contains { $0.state == .needsSetup } }
 
     var needsYou: [NeedsYouItem] {
         var items: [NeedsYouItem] = []
+        if credentialAttentionNeeded {
+            items.append(.init(id: "credentials", icon: "key", text: network.credentials?.detail ?? "Credential protection is not answering. Check system protection setup.", button: "Review", action: .openCredentialProtection))
+        }
         if case let .failed(reason) = engineState {
             items.append(.init(id: "engine", icon: "exclamationmark.triangle.fill", text: "BoxCop's engine stopped. \(reason)", button: "Restart", action: .restartEngine))
         }
@@ -242,6 +248,7 @@ struct NeedsYouItem: Identifiable {
     }
     func perform(_ action: NeedsYouItem.Action) {
         switch action {
+        case .openCredentialProtection: page = .protections
         case .openNetworkSettings: network.provisioning.openApprovalSettings()
         case .repairHooks: changeHooks(.install)
         case .openHealth: page = .health
@@ -448,6 +455,12 @@ struct NeedsYouItem: Identifiable {
         Task {
             if case let .packageProtection(status)? = await request(.packageProtection(.disable)) { packageStatus = status }
             if case let .scriptProtection(status)? = await request(.scriptProtection(.disable)) { scriptStatus = status }
+            if network.credentials?.enabled == true {
+                if await NetworkServiceClient.send("credential-protection-off") != nil {
+                    defaults.set(true, forKey: "boxcop.paused.credentials")
+                }
+                await network.refresh()
+            }
             if network.snapshot?.threatProtection?.enabled == true {
                 defaults.set(true, forKey: "boxcop.paused.threatBlocking")
                 _ = await NetworkServiceClient.send("network-threat-blocking-off")
@@ -460,6 +473,12 @@ struct NeedsYouItem: Identifiable {
         paused = false; defaults.set(false, forKey: "boxcop.paused")
         Task {
             if engineState == .running { await reconcile() } else { startEngine() }
+            if defaults.bool(forKey: "boxcop.paused.credentials") {
+                if await NetworkServiceClient.send("credential-protection-on") != nil {
+                    defaults.set(false, forKey: "boxcop.paused.credentials")
+                }
+                await network.refresh()
+            }
             if defaults.bool(forKey: "boxcop.paused.threatBlocking") {
                 defaults.set(false, forKey: "boxcop.paused.threatBlocking")
                 _ = await NetworkServiceClient.send("network-threat-blocking-on")

@@ -16,11 +16,11 @@ NETWORK_ID = APP_ID + '.network-filter'
 EXECUTABLE = 'BoxCopNetworkFilter'
 # Must equal the @objc(...) name in Sources/BoxCopNetworkFilter/main.swift.
 PROVIDER_CLASS = 'BoxCopFilterDataProvider'
-USAGE = 'BoxCop records new outgoing connections from every app and blocks hosts on its threat list.'
+USAGE = 'BoxCop records new outgoing connections from every app and blocks hosts on its threat list. It also protects credential files from recognized agents and their descendants.'
 REQUIRED = {
     'app': {'com.apple.developer.system-extension.install': True,
             'com.apple.developer.networking.networkextension': ['content-filter-provider-systemextension']},
-    'network': {'com.apple.developer.networking.networkextension': ['content-filter-provider-systemextension']},
+    'network': {'com.apple.developer.endpoint-security.client': True, 'com.apple.developer.networking.networkextension': ['content-filter-provider-systemextension']},
 }
 IDENTIFIERS = {'app': APP_ID, 'network': NETWORK_ID}
 

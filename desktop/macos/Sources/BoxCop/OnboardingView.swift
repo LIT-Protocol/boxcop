@@ -50,9 +50,11 @@ struct OnboardingView: View {
                         row(layer)
                     }
                 }
+                Text("Credential protection is an optional beta in Protections. It needs Full Disk Access and an agent restart.")
+                    .font(.system(size: 12)).foregroundStyle(Palette.quiet).fixedSize(horizontal: false, vertical: true)
                 HStack(spacing: 12) {
                     Image(systemName: "lock").font(.system(size: 12)).foregroundStyle(Palette.quiet)
-                    Text("No account. Nothing is uploaded.").font(.system(size: 12.5)).foregroundStyle(Palette.quiet)
+                    Text("No account. Decisions stay on this Mac.").font(.system(size: 12.5)).foregroundStyle(Palette.quiet)
                     Spacer()
                     Button(chosen.isEmpty ? "Continue without protection" : "Turn on protection") { model.finishOnboarding(chosen) }
                         .buttonStyle(PrimaryButtonStyle(large: true)).keyboardShortcut(.defaultAction)

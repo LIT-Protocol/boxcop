@@ -18,6 +18,7 @@ sys.path.insert(0, str(Path(__file__).resolve().parent))
 from build_app import BuildError, validate_update_feed  # noqa: E402
 
 REPO = 'LIT-Protocol/boxcop'
+GITHUB_FEED = f'https://github.com/{REPO}/releases/latest/download/appcast.xml'
 # GitHub repository IDs survive a rename or transfer; forks have different IDs.
 REPOSITORY_ID = '1455881957'
 ROOT = Path(__file__).resolve().parents[3]
@@ -57,7 +58,9 @@ def update_feed(source=None):
 
 
 def download_prefix(feed, tag):
-    """Release files are served beside the appcast, in a directory named after the tag."""
+    """GitHub uses versioned assets; custom hosts use directories beside the feed."""
+    if feed == GITHUB_FEED:
+        return f'https://github.com/{REPO}/releases/download/{tag}/'
     return feed.rsplit('/', 1)[0] + '/' + tag + '/'
 
 
@@ -134,7 +137,7 @@ def verify_appcast(feed, archive, info, download_url):
     key.verify(base64.b64decode(enclosure.get(SPARKLE + 'edSignature', ''), validate=True), archive.read_bytes())
 
 
-def publish(output):
+def publish(output, *, rehearsal=False):
     repo = release_repository()
     feed_url, public_key = update_feed()
     version = os.environ['BOXCOP_VERSION']
@@ -196,6 +199,12 @@ Threat-domain list: {threats['source']}, {threats['count']:,} hostnames, publish
 Build: `{sha}`. Developer ID signed and notarized. CI verifies packaging and first
 launch. It does not exercise the protections interactively.
 ''')
+    if rehearsal:
+        with open(os.environ['GITHUB_STEP_SUMMARY'], 'a') as stream:
+            stream.write(f'Rehearsed BoxCop {version} from `{sha}`: signed update artifacts verified. '
+                         'No tag or GitHub release created. Download the workflow artifact for VM testing.\n')
+        print('Release rehearsal passed; no tag or release created.')
+        return
     # Stage all assets as a draft before publishing. Never clobber releases.
     command('gh', 'release', 'create', tag, '--repo', repo, '--target', sha, '--draft',
             '--title', f'BoxCop {version}', '--notes-file', notes, '--generate-notes',
@@ -212,8 +221,9 @@ if __name__ == '__main__':
     parser.add_argument('action', choices=['prepare', 'publish'])
     parser.add_argument('--version')
     parser.add_argument('--output', type=Path)
+    parser.add_argument('--rehearsal', action='store_true', help='Verify and stage update assets without publishing')
     args = parser.parse_args()
     if args.action == 'prepare':
         prepare(args.version)
     else:
-        publish(args.output)
+        publish(args.output, rehearsal=args.rehearsal)

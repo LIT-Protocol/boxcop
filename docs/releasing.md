@@ -89,7 +89,7 @@ The public repository can host updates directly. Set `BOXCOP_UPDATE_FEED_URL` to
 `https://github.com/LIT-Protocol/boxcop/releases/latest/download/appcast.xml`.
 The publisher signs DMG URLs under `/releases/download/v<VERSION>/` and marks the
 published release latest. Before the first publication, the appcast URL returns
-404; a rehearsal verifies its contents locally but does not make that URL live.
+404; the first successful release run makes it live.
 
 Custom hosts remain supported: serve `appcast.xml` at the configured feed URL and
 DMGs at `<feed directory>/v<VERSION>/`. The workflow uploads only to GitHub, so a
@@ -99,16 +99,13 @@ public Sparkle feed. Do not embed a GitHub token in the app or feed URL.
 ## The Release workflow
 
 **Actions → Release BoxCop → Run workflow**, on `main`. Merging a PR runs CI;
-it does not publish a release. Leave **publish** unchecked for the first run:
-this rehearses the full signed/notarized build and update-signing path and retains
-`BoxCop-release-rehearsal` for seven days, without creating a tag or release.
-Install its DMG in the dedicated VM before running again with **publish** checked.
-Leave the version blank to increment the highest published patch version, or
-enter one. A rehearsal does not consume a version.
+it does not publish a release. Manually running this workflow builds, validates,
+and publishes a release. Leave the version blank to increment the highest published
+patch version, or enter one.
 
 ```sh
 gh workflow run release.yml --ref main
-gh workflow run release.yml --ref main -f version=0.2.0 -f publish=true
+gh workflow run release.yml --ref main -f version=0.2.0
 ```
 
 The workflow is manual only. It:
@@ -121,10 +118,9 @@ The workflow is manual only. It:
 3. Refreshes the bundled threat list and fails if upstream is older than two days.
 4. Runs the Python tests, then `./build.sh` with temporary signing credentials.
 5. Runs the first-launch smoke test on the signed app.
-6. Generates, signs and verifies the appcast and DMG. In rehearsal mode, uploads
-   those files, debug symbols, `SHA256SUMS`, `build-evidence.json`, the launch smoke
-   log and threat list manifest as a workflow artifact. With **publish** checked,
-   publishes them as GitHub release `v<VERSION>` instead.
+6. Generates, signs and verifies the appcast and DMG, then publishes GitHub release
+   `v<VERSION>` with the DMG, appcast, debug symbols, `SHA256SUMS`,
+   `build-evidence.json`, the launch smoke log and threat list manifest.
 
 Tags and releases are never overwritten, and versions must increase.
 

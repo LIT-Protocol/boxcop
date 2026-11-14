@@ -182,9 +182,8 @@ def publication(tmp_path, monkeypatch):
     return output, info, key
 
 
-@pytest.mark.parametrize('rehearsal', [False, True])
 @pytest.mark.parametrize('github_feed', [False, True])
-def test_publication_uses_configured_feed_for_assets_and_github(publication, monkeypatch, rehearsal, github_feed):
+def test_publication_uses_configured_feed_for_assets_and_github(publication, monkeypatch, github_feed):
     output, info, key = publication
     repo = release.REPO
     if github_feed:
@@ -211,22 +210,20 @@ def test_publication_uses_configured_feed_for_assets_and_github(publication, mon
         return ''
 
     monkeypatch.setattr(release, 'command', command)
-    release.publish(output, rehearsal=rehearsal)
+    release.publish(output)
     github = [c for c in calls if c[0] == 'gh']
-    assert [c[2] for c in github] == ([] if rehearsal else ['create', 'edit'])
+    assert [c[2] for c in github] == ['create', 'edit']
     assert all(c[c.index('--repo') + 1] == repo for c in github)
-    if not rehearsal:
-        assert '--draft' in github[0] and '--draft=false' in github[1]
+    assert '--draft' in github[0] and '--draft=false' in github[1]
     symbols = output / 'release/BoxCop-0.1.0-arm64-symbols.zip'
     assert symbols.is_file()
-    if not rehearsal:
-        assert symbols in github[0]
+    assert symbols in github[0]
     assert symbols.name in (output / 'release/SHA256SUMS').read_text()
     threats = json.loads(release.THREAT_MANIFEST.read_text())
     assert (output / 'release/threat-domains-manifest.json').is_file()
     assert threats['revision'] in (output / 'release-notes.md').read_text()
     summary = (output.parent / 'summary').read_text()
-    assert ('No tag or GitHub release created.' if rehearsal else f'https://github.com/{repo}/releases/tag/v0.1.0') in summary
+    assert f'https://github.com/{repo}/releases/tag/v0.1.0' in summary
     notes = (output / 'release-notes.md').read_text()
     assert 'BoxCop 0.1.0' in notes
 

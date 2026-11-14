@@ -13,7 +13,7 @@ that runs later outside the sandbox.
 import base64
 from collections import OrderedDict, deque
 from datetime import datetime, timezone
-from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
+from http.server import BaseHTTPRequestHandler
 import ipaddress
 import json
 import os
@@ -30,6 +30,7 @@ import threading
 import time
 from urllib.parse import parse_qs, urlsplit
 
+from .loopback_http import LoopbackHTTPServer
 from .event_log import EventLog, private_directory
 from .package_intelligence import atomic_write, canonical
 from .package_routing import read_config
@@ -433,7 +434,7 @@ class ProxyHandler(BaseHTTPRequestHandler):
     do_HEAD = do_POST = do_PUT = do_PATCH = do_DELETE = do_OPTIONS = do_GET
 
 
-class ProxyServer(ThreadingHTTPServer):
+class ProxyServer(LoopbackHTTPServer):
     daemon_threads = True
 
     def __init__(self, guard, port=PORT):

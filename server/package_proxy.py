@@ -7,7 +7,7 @@ private registries and lockfiles pointing elsewhere remain outside this boundary
 import base64
 import hashlib
 import hmac
-from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
+from http.server import BaseHTTPRequestHandler
 import json
 import re
 import threading
@@ -16,6 +16,7 @@ from urllib.parse import quote, unquote, urlsplit
 import httpx
 from packaging.utils import parse_wheel_filename, parse_sdist_filename
 
+from .loopback_http import LoopbackHTTPServer
 from .package_intelligence import MAX_BYTES, canonical, package_name, version
 
 METADATA_LIMIT = 32 * 1024 * 1024
@@ -435,7 +436,7 @@ class Handler(BaseHTTPRequestHandler):
                 self.close_connection = True
 
 
-class RegistryServer(ThreadingHTTPServer):
+class RegistryServer(LoopbackHTTPServer):
     daemon_threads = True
     def __init__(self, firewall, port=8794):
         self.firewall = firewall

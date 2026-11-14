@@ -183,7 +183,10 @@ def test_busy_audit_denies_before_vendor_timeout(layout):
         db.execute('BEGIN IMMEDIATE')
         started = time.monotonic()
         result = call('cursor', data, payload('cursor', 'printf harmless'))
-        assert time.monotonic() - started < 2
+        # Measure the vendor's 5s deadline, including interpreter startup and
+        # imports. The hook itself allows 3s, so a 2s process-wide assertion
+        # incorrectly fails on slower CI runners even when it denies in time.
+        assert time.monotonic() - started < 5
         assert result.returncode == 0 and json.loads(result.stdout)['permission'] == 'deny'
     assert json.loads((data/'cursor-receipt.json').read_text())['state'] == 'error'
 

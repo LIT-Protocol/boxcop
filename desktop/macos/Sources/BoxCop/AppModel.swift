@@ -846,10 +846,16 @@ struct NeedsYouItem: Identifiable {
                 if case let .scriptProtection(status)? = await request(.scriptProtection(.disable)) { scriptStatus = status } else { problems.append("script routing") }
             } else if packageStatus?.routed == true || scriptStatus?.routed == true || capabilities.engine { problems.append("package and script routing (the engine is not running)") }
             if let snapshot = await HostAgents.refresh(.remove) { agents = snapshot.connections; agentsLoaded = true } else if capabilities.engine { problems.append("agent hooks") }
-            if capabilities.networkExtension { await network.removeProtection() }
-            removalMessage = problems.isEmpty ? "Hooks, package routing, script routing and the network filter were removed. You can now delete BoxCop."
-                : "Could not remove: \(problems.joined(separator: ", ")). Start BoxCop's engine and try again."
+            if capabilities.networkExtension, !(await network.removeProtection()) {
+                problems.append("system protection: " + (network.provisioningStatus.isEmpty ? "finish macOS approval or wait for the current operation, then retry" : network.provisioningStatus))
+            }
+            removalMessage = Self.removalResult(problems: problems)
         }
+    }
+    static func removalResult(problems: [String]) -> String {
+        problems.isEmpty
+            ? "Hooks, package routing, script routing, network and credential protection were removed. You can now delete BoxCop."
+            : "Removal is incomplete: " + problems.joined(separator: "; ") + ". Keep BoxCop installed, resolve the issue and retry."
     }
     func finishOnboarding(_ chosen: Set<LayerID>) {
         defaults.set(true, forKey: "boxcop.setup.complete")

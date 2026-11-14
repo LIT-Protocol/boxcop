@@ -7,7 +7,7 @@ struct ProtectionsView: View {
     @ObservedObject var model: AppModel
     var body: some View {
         let layers = model.layers
-        PageScaffold(title: "Protections", subtitle: "Six layers. Each one is on only when it is enforcing.") {
+        PageScaffold(title: "Protections", subtitle: "Review what is active and finish any setup steps.") {
             ForEach(layers) { layer in
                 LayerCard(model: model, layer: layer) { content(layer) }
             }
@@ -376,6 +376,7 @@ struct LayerTestSheet: View {
 private struct CredentialProtectionDetails: View {
     @ObservedObject var network: NetworkConnectionsModel
     let paused: Bool
+    @State private var showLimits = false
     var body: some View {
         VStack(alignment: .leading, spacing: 9) {
             HStack {
@@ -389,8 +390,12 @@ private struct CredentialProtectionDetails: View {
             }
             Text(network.credentials?.detail ?? (network.provisioning.available ? "Enable system protection to protect credential files. macOS will ask for extension approval and Full Disk Access." : "Requires a signed build with the Endpoint Security extension."))
                 .font(.system(size: 12.5)).fixedSize(horizontal: false, vertical: true)
+            Text("Protects common SSH, AWS, Google Cloud and package-registry credential files. Restart agents after enabling.")
+                .font(.system(size: 12.5)).fixedSize(horizontal: false, vertical: true)
+            DisclosureGroup("Coverage and limitations", isExpanded: $showLimits) {
             Text("Covers signed Claude, Claude Code, Codex CLI and Cursor processes and tracked descendants. Restart agents after enabling. Unsigned tools and existing detached helpers may be unprotected. Credential APIs, inherited file handles and custom key locations are not covered. Newly replaced files accessed through aliases may be missed until the next index refresh.")
                 .font(.system(size: 11.5)).foregroundStyle(Palette.quiet)
+            }
             if network.credentials?.state == "needsPermission" {
                 Button("Open Full Disk Access") { network.openFullDiskAccess() }.buttonStyle(.quiet)
             }

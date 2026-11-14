@@ -32,13 +32,13 @@ struct SettingsView: View {
             }
             section("Protection") {
                 actionRow(model.paused ? "Protection is paused" : "Pause protection",
-                          model.paused ? "Package checks, containment and threat blocking are off. Agent hooks stay connected."
-                                       : "Turns off package checks, containment and threat blocking until you resume. Agent hooks stay connected.") {
+                          model.paused ? "Package checks, containment, threat blocking and credential protection are off. Agent hooks stay connected."
+                                       : "Turns off package checks, containment, threat blocking and credential protection until you resume. Agent hooks stay connected.") {
                     Button(model.paused ? "Resume" : "Pause") { if model.paused { model.resume() } else { model.pause() } }.buttonStyle(model.paused ? AnyButtonStyle(.primary) : AnyButtonStyle(.quiet))
                 }
                 RowDivider()
                 actionRow("Remove BoxCop's integrations", model.removalMessage.isEmpty
-                          ? "Removes the agent hooks, package routing, script routing and the network filter. Do this before deleting the app." : model.removalMessage) {
+                          ? "Removes the agent hooks, package routing, script routing, network filtering and credential protection. Do this before deleting the app." : model.removalMessage) {
                     Button("Remove") { confirmRemoval = true }.buttonStyle(QuietButtonStyle(tint: Palette.red))
                 }
             }
@@ -49,7 +49,7 @@ struct SettingsView: View {
                 RowDivider()
                 infoRow("Data on this Mac", EngineTools.dataDirectory.path.replacingOccurrences(of: NSHomeDirectory(), with: "~"))
                 RowDivider()
-                infoRow("Privacy", "No account. Nothing is uploaded.")
+                infoRow("Privacy", "No account. Protection decisions stay on this Mac. Updates and security feeds require downloads.")
             }
             VStack(alignment: .leading, spacing: 7) {
                 SectionTitle("Help: what BoxCop does not do")
@@ -67,7 +67,7 @@ struct SettingsView: View {
             }
         }
         .confirmationDialog("Remove BoxCop's integrations?", isPresented: $confirmRemoval, titleVisibility: .visible) {
-            Button("Remove hooks, routing and the network filter", role: .destructive) { model.removeIntegrations() }
+            Button("Remove hooks, routing and system protection", role: .destructive) { model.removeIntegrations() }
         } message: {
             Text("Agents, npm and pip go back to how they were before BoxCop. Your event history and settings stay on this Mac.")
         }
@@ -104,10 +104,10 @@ struct SettingsView: View {
     private func infoRow(_ title: String, _ value: String) -> some View {
         HStack(spacing: 12) {
             Text(title).font(.system(size: 12.5, weight: .medium)).frame(width: 130, alignment: .leading)
-            Text(value).font(.system(size: 12)).foregroundStyle(Palette.quiet).textSelection(.enabled).lineLimit(1).truncationMode(.middle)
+            Text(value).font(.system(size: 12)).foregroundStyle(Palette.quiet).textSelection(.enabled).fixedSize(horizontal: false, vertical: true)
             Spacer()
         }
-        .padding(.horizontal, 12).frame(height: 32)
+        .padding(.horizontal, 12).padding(.vertical, 8)
     }
 }
 

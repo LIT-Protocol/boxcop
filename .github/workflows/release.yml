@@ -1,14 +1,19 @@
 name: Release BoxCop
-run-name: Release BoxCop ${{ inputs.version || '(auto patch)' }} from main
+run-name: ${{ inputs.publish && 'Publish' || 'Rehearse' }} BoxCop ${{ inputs.version || '(auto patch)' }} from main
 
 # Manual only. Builds the Developer ID signed, notarized app with the network
-# extension and publishes a GitHub release in LIT-Protocol/boxcop.
+# extension; rehearses by default, or publishes when explicitly selected.
 # Required secrets and variables are listed in docs/releasing.md. The first step
 # stops with their names when any are missing.
 
 on:
   workflow_dispatch:
     inputs:
+      publish:
+        description: 'Publish the verified release (leave unchecked to rehearse and download artifacts)'
+        required: false
+        type: boolean
+        default: false
       version:
         description: 'Optional version (major.minor.patch); leave blank to bump the patch version'
         required: false
@@ -101,11 +106,25 @@ jobs:
         run: ./build.sh "$RUNNER_TEMP/out"
       - name: Verify packaged launch
         run: bash desktop/macos/scripts/ci_launch_smoke.sh "$RUNNER_TEMP/out/BoxCop.app" "$RUNNER_TEMP/out"
-      - name: Sign update feed and publish GitHub release
+      - name: Sign and verify update artifacts; publish only when requested
         env:
           GH_TOKEN: ${{ github.token }}
           BOXCOP_SPARKLE_PRIVATE_KEY: ${{ secrets.BOXCOP_SPARKLE_PRIVATE_KEY }}
-        run: .venv/bin/python desktop/macos/scripts/release.py publish --output "$RUNNER_TEMP/out"
+          PUBLISH_RELEASE: ${{ inputs.publish }}
+        run: |
+          args=()
+          if [ "$PUBLISH_RELEASE" != "true" ]; then args+=(--rehearsal); fi
+          .venv/bin/python desktop/macos/scripts/release.py publish --output "$RUNNER_TEMP/out" "${args[@]}"
+      - name: Retain verified rehearsal artifacts
+        if: success() && !inputs.publish
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+        with:
+          name: BoxCop-release-rehearsal
+          path: |
+            ${{ runner.temp }}/out/release/
+            ${{ runner.temp }}/out/release-notes.md
+          if-no-files-found: error
+          retention-days: 7
       - name: Remove signing credentials
         if: always()
         run: python3.12 desktop/macos/scripts/ci_signing.py cleanup

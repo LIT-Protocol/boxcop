@@ -59,7 +59,8 @@ enum NetworkSetupPhase: Equatable { case idle, extensionApproval, filterApproval
             update("Filter setup failed. Review macOS Network Extensions approval and retry."); phaseChanged(.declined); return false
         }
     }
-    func removeExtensions() async {
+    func removeExtensions() async -> Bool {
+        activationFailure = nil
         // A filter must be disabled before its decision service is removed.
         let manager = NEFilterManager.shared()
         do {
@@ -68,17 +69,18 @@ enum NetworkSetupPhase: Equatable { case idle, extensionApproval, filterApproval
                 manager.isEnabled = false
                 try await manager.saveToPreferences()
             }
-        } catch { update("Could not disable the filter; services were not removed. Disable BoxCop in System Settings first."); return }
+        } catch { update("Could not disable the filter; services were not removed. Disable BoxCop in System Settings first."); return false }
         for identifier in [NetworkFilterControl.identifier] {
-            guard continuation == nil else { return }
+            guard continuation == nil else { return false }
             let success = await withCheckedContinuation { continuation in
                 self.continuation = continuation
                 let request = OSSystemExtensionRequest.deactivationRequest(forExtensionWithIdentifier: identifier, queue: .main)
                 request.delegate = self; OSSystemExtensionManager.shared.submitRequest(request)
             }
-            if !success { return }
+            if !success { return false }
         }
-        update("Network extension removed. Connection history and blocking preferences were retained.")
+        update("Network and credential protection removed. Connection history and blocking preferences were retained.")
+        return true
     }
     nonisolated func requestNeedsUserApproval(_ request: OSSystemExtensionRequest) {
         Task { @MainActor in

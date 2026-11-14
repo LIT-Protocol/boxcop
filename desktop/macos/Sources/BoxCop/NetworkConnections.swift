@@ -74,9 +74,16 @@ import UniformTypeIdentifiers
             await refresh(); busy = false
         }
     }
-    func removeProtection() async {
-        guard !busy else { return }; busy = true
-        await provisioning.removeExtensions(); await refresh(); busy = false
+    func removeProtection() async -> Bool {
+        guard !busy else { return false }; busy = true
+        defer { busy = false }
+        let removed = await provisioning.removeExtensions()
+        await refresh()
+        if removed {
+            credentialProtectionWanted = false
+            UserDefaults.standard.set(false, forKey: "boxcop.credentials.wanted")
+        }
+        return removed
     }
     func refresh() async {
         guard !refreshing else { return }; refreshing = true

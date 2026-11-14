@@ -68,7 +68,7 @@ gate, export the three `BOXCOP_PACKAGE_FEED_*` variables first.
 
 ## In-app updates
 
-BoxCop has no update feed yet. The checked-in `Info.plist` names no feed, and a
+The checked-in `Info.plist` names no feed, and a
 build without one does not start its updater: `BoxCop --check-updater-startup`
 prints `UPDATER_STARTUP_SKIPPED`, exits 0, and the app offers no update check.
 The build fails if a bundle without a feed reports anything else.
@@ -85,33 +85,46 @@ The appcast must be signed, and updates are verified before extraction; those tw
 settings are fixed in `Info.plist`. Installing an update always needs the user's
 action.
 
-No update domain is built in. To host a feed, serve `appcast.xml` at the feed URL
-and each release's DMG at `<feed directory>/v<VERSION>/`, which is the layout the
-release script signs for.
+The public repository can host updates directly. Set `BOXCOP_UPDATE_FEED_URL` to
+`https://github.com/LIT-Protocol/boxcop/releases/latest/download/appcast.xml`.
+The publisher signs DMG URLs under `/releases/download/v<VERSION>/` and marks the
+published release latest. Before the first publication, the appcast URL returns
+404; a rehearsal verifies its contents locally but does not make that URL live.
+
+Custom hosts remain supported: serve `appcast.xml` at the configured feed URL and
+DMGs at `<feed directory>/v<VERSION>/`. The workflow uploads only to GitHub, so a
+custom host needs separate deployment. Private release assets cannot serve as a
+public Sparkle feed. Do not embed a GitHub token in the app or feed URL.
 
 ## The Release workflow
 
-**Actions → Release BoxCop → Run workflow**, on `main`. Leave the version blank to
-increment the patch number of the highest published version, or enter one.
+**Actions → Release BoxCop → Run workflow**, on `main`. Merging a PR runs CI;
+it does not publish a release. Leave **publish** unchecked for the first run:
+this rehearses the full signed/notarized build and update-signing path and retains
+`BoxCop-release-rehearsal` for seven days, without creating a tag or release.
+Install its DMG in the dedicated VM before running again with **publish** checked.
+Leave the version blank to increment the highest published patch version, or
+enter one. A rehearsal does not consume a version.
 
 ```sh
 gh workflow run release.yml --ref main
-gh workflow run release.yml --ref main -f version=0.2.0
+gh workflow run release.yml --ref main -f version=0.2.0 -f publish=true
 ```
 
 The workflow is manual only. It:
 
 1. Checks that every secret and variable below exists, and stops with their names
-   when any are missing. **They are not configured yet**, so the workflow stops
-   here today.
+   when any are missing. Secret names alone do not prove their values are valid;
+   profile/certificate checks, notarization and update-signing verification follow.
 2. Confirms it runs from `main` in `LIT-Protocol/boxcop` (repository ID
    `1455881957`; forks have a different ID) and that the version is new.
 3. Refreshes the bundled threat list and fails if upstream is older than two days.
 4. Runs the Python tests, then `./build.sh` with temporary signing credentials.
 5. Runs the first-launch smoke test on the signed app.
-6. Generates and signs the appcast, then publishes `v<VERSION>` as a GitHub
-   release with the DMG, `appcast.xml`, debug symbols, `SHA256SUMS`,
-   `build-evidence.json`, the launch smoke log and the threat list manifest.
+6. Generates, signs and verifies the appcast and DMG. In rehearsal mode, uploads
+   those files, debug symbols, `SHA256SUMS`, `build-evidence.json`, the launch smoke
+   log and threat list manifest as a workflow artifact. With **publish** checked,
+   publishes them as GitHub release `v<VERSION>` instead.
 
 Tags and releases are never overwritten, and versions must increase.
 

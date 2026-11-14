@@ -182,9 +182,14 @@ def publication(tmp_path, monkeypatch):
     return output, info, key
 
 
-def test_publication_uses_configured_feed_for_assets_and_github(publication, monkeypatch):
+@pytest.mark.parametrize('rehearsal', [False, True])
+@pytest.mark.parametrize('github_feed', [False, True])
+def test_publication_uses_configured_feed_for_assets_and_github(publication, monkeypatch, rehearsal, github_feed):
     output, info, key = publication
     repo = release.REPO
+    if github_feed:
+        monkeypatch.setenv('BOXCOP_UPDATE_FEED_URL', release.GITHUB_FEED)
+        info['SUFeedURL'] = release.GITHUB_FEED
     (output / 'BoxCop.app/Contents/Info.plist').write_bytes(plistlib.dumps(info))
     calls = []
 
@@ -192,7 +197,7 @@ def test_publication_uses_configured_feed_for_assets_and_github(publication, mon
         calls.append(args)
         if Path(args[0]).name == 'generate_appcast':
             prefix = args[args.index('--download-url-prefix') + 1]
-            assert prefix == 'https://updates.example/boxcop/v0.1.0/'
+            assert prefix == (f'https://github.com/{repo}/releases/download/v0.1.0/' if github_feed else 'https://updates.example/boxcop/v0.1.0/')
             assert args[args.index('--link') + 1] == 'https://github.com/LIT-Protocol/boxcop/releases'
             archive = output / 'release/BoxCop-0.1.0-arm64.dmg'
             root = ET.Element('rss')
@@ -206,18 +211,22 @@ def test_publication_uses_configured_feed_for_assets_and_github(publication, mon
         return ''
 
     monkeypatch.setattr(release, 'command', command)
-    release.publish(output)
+    release.publish(output, rehearsal=rehearsal)
     github = [c for c in calls if c[0] == 'gh']
-    assert [c[2] for c in github] == ['create', 'edit']
+    assert [c[2] for c in github] == ([] if rehearsal else ['create', 'edit'])
     assert all(c[c.index('--repo') + 1] == repo for c in github)
-    assert '--draft' in github[0] and '--draft=false' in github[1]
+    if not rehearsal:
+        assert '--draft' in github[0] and '--draft=false' in github[1]
     symbols = output / 'release/BoxCop-0.1.0-arm64-symbols.zip'
-    assert symbols.is_file() and symbols in github[0]
+    assert symbols.is_file()
+    if not rehearsal:
+        assert symbols in github[0]
     assert symbols.name in (output / 'release/SHA256SUMS').read_text()
     threats = json.loads(release.THREAT_MANIFEST.read_text())
     assert (output / 'release/threat-domains-manifest.json').is_file()
     assert threats['revision'] in (output / 'release-notes.md').read_text()
-    assert f'https://github.com/{repo}/releases/tag/v0.1.0' in (output.parent / 'summary').read_text()
+    summary = (output.parent / 'summary').read_text()
+    assert ('No tag or GitHub release created.' if rehearsal else f'https://github.com/{repo}/releases/tag/v0.1.0') in summary
     notes = (output / 'release-notes.md').read_text()
     assert 'BoxCop 0.1.0' in notes
 

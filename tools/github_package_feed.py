@@ -14,11 +14,12 @@ from tools.package_publisher import Publisher
 def update(directory, key, approval):
     publisher = Publisher(directory, key)
     pending = directory / 'pending.json'
+    pending_digest = json.loads(pending.read_bytes())['sha256'] if pending.exists() else None
     if approval:
-        if not pending.exists() or json.loads(pending.read_bytes())['sha256'] != approval:
+        if pending_digest != approval:
             raise ValueError('Approval must match the pending candidate digest')
         publisher.promote(approval, approved=True)
-    else:
+    elif not pending_digest or publisher.release(pending_digest)['policy'].status()['stale']:
         current = publisher.current()
         if current:
             source = current['directory']
@@ -26,11 +27,11 @@ def update(directory, key, approval):
                 for part in sorted(source.glob('cursor-*.gz')):
                     with gzip.open(part, 'rb') as stream:
                         shutil.copyfileobj(stream, out)
-        status = publisher.cycle()
+        candidate = publisher.stage(token=os.environ.get('GITHUB_TOKEN'))
         if current:
             (current['directory'] / 'github.json').unlink()
-        if status.get('error') and not status['error'].startswith('Candidate held for review:'):
-            raise RuntimeError(status['error'])
+        if not candidate['requires_review']:
+            publisher.promote(candidate['sha256'])
 
     current = publisher.current()
     keep = set()

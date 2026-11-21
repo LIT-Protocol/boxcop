@@ -94,7 +94,7 @@ jobs:
       - name: Build, test, sign and notarize
         env:
           BOXCOP_CHANNEL: beta
-          # Feed trust configuration. Unset: install gate unavailable.
+          # Optional overrides for the bundled package feed and verification key.
           BOXCOP_PACKAGE_FEED_URL: ${{ vars.BOXCOP_PACKAGE_FEED_URL }}
           BOXCOP_PACKAGE_FEED_PUBLIC_KEY_BASE64: ${{ vars.BOXCOP_PACKAGE_FEED_PUBLIC_KEY_BASE64 }}
           BOXCOP_PACKAGE_FEED_MINIMUM_SEQUENCE: ${{ vars.BOXCOP_PACKAGE_FEED_MINIMUM_SEQUENCE }}

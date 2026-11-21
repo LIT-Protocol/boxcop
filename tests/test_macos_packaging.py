@@ -65,12 +65,15 @@ def test_child_environment_drops_import_injection_and_development_overrides():
     assert not any(key.startswith(("PYTHON", "BOXCOP_ENGINE_", "DYLD_", "LD_")) for key in env)
 
 
-def test_package_channel_is_optional_and_embeds_only_public_pin(tmp_path, monkeypatch):
+def test_package_channel_defaults_to_official_feed_and_supports_custom_pin(tmp_path, monkeypatch):
     import base64
     builder = load_builder()
     monkeypatch.delenv('BOXCOP_PACKAGE_FEED_URL', raising=False)
     monkeypatch.delenv('BOXCOP_PACKAGE_FEED_PUBLIC_KEY_BASE64', raising=False)
-    assert builder.prepare_package_channel(tmp_path) == []
+    builder.prepare_package_channel(tmp_path)
+    default = json.loads((tmp_path / 'channel.json').read_text())
+    assert default['url'] == 'https://raw.githubusercontent.com/LIT-Protocol/boxcop/package-feed/policy.json'
+    assert len(base64.b64decode(default['public_key'], validate=True)) == 32
     monkeypatch.setenv('BOXCOP_PACKAGE_FEED_URL', 'https://feed.example/v1/policy.json')
     with pytest.raises(builder.BuildError):
         builder.prepare_package_channel(tmp_path)

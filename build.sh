@@ -24,7 +24,7 @@ Optional environment variables:
   BOXCOP_APP_PROFILE       App profile (default: ~/.sentinel-lab/profiles/BoxCop_Developer_ID.provisionprofile)
   BOXCOP_NETWORK_PROFILE   Network profile (default: ~/.sentinel-lab/profiles/BoxCop_Network_Developer_ID.provisionprofile)
   BOXCOP_EXTENSION_VERSION Override extension build number (default: current Unix timestamp)
-  BOXCOP_PACKAGE_FEED_URL                 Signed package malware feed (unset: install gate unavailable)
+  BOXCOP_PACKAGE_FEED_URL                 Override the official signed package malware feed
   BOXCOP_PACKAGE_FEED_PUBLIC_KEY_BASE64   Ed25519 key that feed is verified with
   BOXCOP_PACKAGE_FEED_MINIMUM_SEQUENCE    Lowest feed sequence this build accepts (default: 1)
   BOXCOP_UPDATE_FEED_URL   Sparkle appcast URL. Unset (default): the build has no in-app updates

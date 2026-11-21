@@ -73,7 +73,18 @@ request never reaches the public registry.
 
 ## Where the list comes from
 
-Configure a signed feed before building with either `build.sh` or `build_app.py`:
+BoxCop builds include the official feed URL and Ed25519 verification key. The
+**Publish package malware feed** workflow refreshes the npm and PyPI snapshot
+hourly on the `package-feed` branch. Clients read `policy.json` from that branch.
+
+The publisher holds the initial baseline and unusually large changes for review.
+Inspect the pending digest and `candidates/<digest>/review.json` on the feed
+branch, then run the workflow manually on main with that exact `approve_digest`.
+The last approved snapshot stays available while a candidate awaits review.
+The repository secret `BOXCOP_FEED_SIGNING_KEY_BASE64` holds the raw 32-byte
+signing key encoded in base64.
+
+To build for a custom publisher, set these before running either build script.
 
 ```sh
 export BOXCOP_PACKAGE_FEED_URL=https://YOUR-FEED-HOST/policy.json
@@ -81,10 +92,7 @@ export BOXCOP_PACKAGE_FEED_PUBLIC_KEY_BASE64=YOUR_BASE64_ED25519_PUBLIC_KEY
 export BOXCOP_PACKAGE_FEED_MINIMUM_SEQUENCE=1
 ```
 
-These are placeholders, not a hosted service. No feed is trusted by default;
-without configuration the install gate shows "Unavailable". See the publisher
-instructions below to generate a key and publish a snapshot. Provision the public
-key through a trusted channel independently of the feed host.
+Distribute the custom verification key through a trusted build channel.
 
 The payload schema is `boxcop.package-policy.v1` and compressed signatures use
 `boxcop.package-policy.zlib.v1` followed by a NUL byte. Older publisher formats
@@ -161,8 +169,7 @@ trusted release/provisioning path. Never accept a public key from the feed URL.
 Each successful build must increase `--sequence`. Preserve the previous output
 file and state directory across runs; serialize publisher jobs. The output carries
 the full policy, license texts, attribution, and source metadata. Host that signed
-file on an HTTPS endpoint when deploying. This repository does not configure a
-hosting account or endpoint.
+file on an HTTPS endpoint when deploying. The official publisher uses GitHub.
 
 Optional flags:
 

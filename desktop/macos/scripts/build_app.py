@@ -209,10 +209,7 @@ def engine_freeze_options(root=None, mac=MAC):
 
 
 def prepare_package_channel(work):
-    """Embed only a public trust pin. Missing configuration keeps activation off.
-
-    Builders supply their feed URL and public key; see docs/package-registry-firewall.md.
-    """
+    """Embed the official trust pin or an explicitly configured custom channel."""
     import importlib.util
     spec = importlib.util.spec_from_file_location('boxcop_package_channel', ROOT / 'server/package_channel.py')
     module = importlib.util.module_from_spec(spec)
@@ -220,7 +217,8 @@ def prepare_package_channel(work):
     url = os.environ.get('BOXCOP_PACKAGE_FEED_URL') or None
     public = os.environ.get('BOXCOP_PACKAGE_FEED_PUBLIC_KEY_BASE64') or None
     if not url and not public:
-        return []
+        url = 'https://raw.githubusercontent.com/LIT-Protocol/boxcop/package-feed/policy.json'
+        public = (MAC / 'Resources/package-feed-public-key.txt').read_text().strip()
     if not url or not public:
         raise BuildError('Package feed URL and public key must be configured together')
     try:
@@ -534,8 +532,8 @@ def build(output, *, host_system=None, signing_identity="-", profile="distributi
     package_status = json.loads(subprocess.check_output(
         [str(engine), "--protection-status", "--data-dir", str(status_home / "data")],
         cwd=work, env=dict(env, HOME=str(status_home)), text=True, timeout=30))
-    package_feed = bool(os.environ.get('BOXCOP_PACKAGE_FEED_URL'))
-    if package_status.get("package", {}).get("configured") is not package_feed:
+    package_feed = json.loads((work / 'channel.json').read_bytes())['url']
+    if package_status.get("package", {}).get("configured") is not True:
         raise BuildError('Bundled package feed trust configuration did not survive freezing/signing')
     observed_profile = subprocess.check_output([str(native), "--release-profile"], cwd=work, env=env, text=True, timeout=10).strip()
     if observed_profile != profile:
@@ -576,7 +574,7 @@ def build(output, *, host_system=None, signing_identity="-", profile="distributi
         "source_commit": subprocess.check_output(["git", "rev-parse", "HEAD"], cwd=ROOT, text=True).strip(),
         "bundle": str(final), "package": str(output / "BoxCop.dmg"), "profile": profile, "channel": channel,
         "network_extension": "embedded" if provisioned else "not_included",
-        "package_feed": os.environ["BOXCOP_PACKAGE_FEED_URL"] if package_feed else "not_configured",
+        "package_feed": package_feed,
         "update_feed": update_feed or "not_configured",
         "updater_startup": "passed" if update_feed else "passed_updater_disabled_without_feed",
         "sparkle_version": "2.10.1",

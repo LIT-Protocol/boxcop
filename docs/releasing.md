@@ -49,7 +49,7 @@ Other variables:
 | `BOXCOP_VERSION` | Display version, `major.minor.patch`. |
 | `BOXCOP_EXTENSION_VERSION` | Build number shared by the app and the extension. Defaults to the current Unix time, so later builds replace earlier ones. |
 | `BOXCOP_PYTHON` | Python 3.12 executable. Default `python3.12`. |
-| `BOXCOP_PACKAGE_FEED_URL`, `BOXCOP_PACKAGE_FEED_PUBLIC_KEY_BASE64`, `BOXCOP_PACKAGE_FEED_MINIMUM_SEQUENCE` | The signed package malware feed. No feed is configured by default; see [package-registry-firewall.md](package-registry-firewall.md). |
+| `BOXCOP_PACKAGE_FEED_URL`, `BOXCOP_PACKAGE_FEED_PUBLIC_KEY_BASE64`, `BOXCOP_PACKAGE_FEED_MINIMUM_SEQUENCE` | Optional overrides for the built-in signed package malware feed; see [package-registry-firewall.md](package-registry-firewall.md). |
 | `BOXCOP_UPDATE_FEED_URL`, `BOXCOP_UPDATE_PUBLIC_KEY` | In-app updates. Unset by default; see below. |
 
 The script never falls back to ad-hoc signing and does not install, launch or

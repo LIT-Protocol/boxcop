@@ -43,8 +43,8 @@ python3.12 -m venv .venv
 The development build is ad-hoc signed and excludes outbound control. That layer
 requires a Developer ID signed app and provisioned network extension.
 
-The install gate requires an explicitly configured signed malware feed. No feed
-is trusted by default; without one it shows "Unavailable". Follow the
+BoxCop ships with the verification key and URL for its hourly package malware
+feed. Turn on **Install gate** in Protections to use it. See the
 [feed configuration and publisher guide](docs/package-registry-firewall.md).
 
 For a signed, notarized distribution build, configure the certificates and

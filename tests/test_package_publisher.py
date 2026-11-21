@@ -140,3 +140,32 @@ def test_slow_refresh_does_not_block_serving_last_good_policy(tmp_path):
         server.shutdown()
         server.server_close()
         http_thread.join(5)
+
+
+def test_github_feed_holds_baseline_and_restores_cursors(tmp_path, monkeypatch):
+    import json
+    from tools.github_package_feed import update
+
+    stage = Publisher.stage
+    cursors = []
+
+    def stage_fixture(self, **kwargs):
+        def inspect(**options):
+            path = options['state_dir'] / 'github.json'
+            cursors.append(json.loads(path.read_bytes()) if path.exists() else None)
+            return collector()(**options)
+        return stage(self, collector=inspect, **kwargs)
+
+    monkeypatch.setattr(Publisher, 'stage', stage_fixture)
+    key = Ed25519PrivateKey.generate()
+    update(tmp_path, key, None)
+    digest = json.loads((tmp_path / 'pending.json').read_bytes())['sha256']
+    assert not (tmp_path / 'policy.json').exists()
+    with pytest.raises(ValueError, match='digest'):
+        update(tmp_path, key, '0' * 64)
+    update(tmp_path, key, digest)
+    feed = tmp_path / 'policy.json'
+    assert verify(feed.read_bytes(), key.public_key().public_bytes_raw()).payload['sequence'] == 1
+    update(tmp_path, key, None)
+    assert cursors[0] is None and cursors[1]['cursor']
+    assert verify(feed.read_bytes(), key.public_key().public_bytes_raw()).payload['sequence'] == 2

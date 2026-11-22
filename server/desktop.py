@@ -65,7 +65,7 @@ def _validate(request):
     operation = request.get("op")
     shapes = {
         "status": set(), "shutdown": set(), "package_protection": {"action"},
-        "script_protection": {"action", "package", "host"}, "security_events": {"limit"},
+        "script_protection": {"action", "package", "host"}, "security_events": {"limit"}, "approve_command": {"event_id"},
         "workflow_context": {"context"}, "workflow_clear": set(),
     }
     if not isinstance(operation, str) or operation not in shapes:
@@ -97,6 +97,8 @@ def _validate(request):
             raise ValueError("Invalid install-script rule")
     if operation == "workflow_context":
         validate_context(request["context"])
+    if operation == "approve_command" and (not isinstance(request["event_id"], str) or len(request["event_id"]) != 36):
+        raise ValueError("Invalid event id")
     if operation == "security_events":
         if type(request["limit"]) is not int or not 1 <= request["limit"] <= 200:
             raise ValueError("Invalid limit")
@@ -123,6 +125,8 @@ def _dispatch(request, engine):
             request['action'], *(request.get(key) for key in ('ecosystem', 'package', 'package_version')))}
     if operation == "script_protection":
         return {'scriptProtection': _script_runtime(engine).command(request['action'], request['package'], request['host'])}
+    if operation == "approve_command":
+        return {"commandApproved": engine.store.approve_command(request["event_id"])}
     if operation == "security_events":
         from .local_package_policy import state_directory
         from .package_scripts import state_directory as script_directory

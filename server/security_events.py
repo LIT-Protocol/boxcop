@@ -57,7 +57,7 @@ COMMAND_TITLES = {
 
 
 def hook_events(store, limit):
-    """Actions a pre-action hook denied. The audit store keeps no command text."""
+    """Actions a pre-action hook denied. Include command review details when the hook recorded them."""
     events = []
     for record in store.list_events(limit=limit, decision='denied')['items']:
         event, decision = record['event'], record['decision']
@@ -82,6 +82,12 @@ def hook_events(store, limit):
             ' '.join(decision['reasons'])[:600],
             subject=path or ', '.join(POLICY_NAMES.get(policy, policy) for policy in policies[:2]) or None,
             agent=event['app'], policy_ids=policies))
+        if action == 'command':
+            review = record.get('command_review')
+            if review:
+                events[-1].update(review, working_directory=event['source'].partition(':')[2] or None)
+            elif event['source'].startswith('reported-'):
+                events[-1]['retry_note'] = 'This hook did not retain the command. Retry in the agent to record a new event.'
     return events
 
 

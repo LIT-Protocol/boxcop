@@ -114,7 +114,7 @@ final class EventFeedTests: XCTestCase {
                                    network: [], findings: [], explanations: ["engine:pkg": "The model's view."])
         XCTAssertEqual(rows[0].explanation, "The model's view.")
         let text = rows[0].detailsText
-        for expected in ["What happened: Event pkg", "Status: Blocked", "Layer: Install gate", "Why: Reason pkg", "Started by: Claude Code -> npm install evil-pkg",
+        for expected in ["What happened: Event pkg", "Status: Blocked", "Layer: Install gate", "Why: Reason pkg", "Started by: Claude Code", "Command: npm install evil-pkg",
                          "Rules: rule-pkg", "Local model: The model's view.", "Reference: engine:pkg"] {
             XCTAssertTrue(text.contains(expected), expected)
         }

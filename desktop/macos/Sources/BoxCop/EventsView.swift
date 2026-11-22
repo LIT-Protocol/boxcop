@@ -36,6 +36,7 @@ struct EventsView: View {
                 if let selected {
                     RowDivider()
                     EventDetail(event: selected, model: model, copied: $copied)
+                        .id(selected.id)
                         .frame(height: 262)
                         .background(Palette.sidebar.opacity(0.55))
                 }
@@ -121,6 +122,10 @@ struct EventDetail: View {
     @Binding var copied: String?
     @State private var confirming: PackageRelease?
 
+    @State private var expanded = false
+    @State private var confirmRetry = false
+    @State private var retryMessage: String?
+
     var body: some View {
         VStack(alignment: .leading, spacing: 0) {
             ScrollView {
@@ -130,6 +135,21 @@ struct EventDetail: View {
                         StatusTag(status: event.status)
                         Spacer()
                         Text("\(event.layer.name) · \(Format.full(event.time))").font(.system(size: 11.5)).foregroundStyle(Palette.quiet).lineLimit(1)
+                    }
+                    if let command = event.command {
+                        fact("Command") {
+                            DisclosureGroup(isExpanded: $expanded) {
+                                Text(command).font(.system(size: 12, design: .monospaced)).textSelection(.enabled)
+                                    .frame(maxWidth: .infinity, alignment: .leading)
+                                if let cwd = event.workingDirectory { Text("Working directory: \(cwd)").textSelection(.enabled) }
+                                Text("Reference: \(event.id)").textSelection(.enabled)
+                            } label: {
+                                Text(expanded ? "Command details" : command).font(.system(size: 12, design: .monospaced)).lineLimit(1)
+                            }
+                        }
+                    }
+                    if let note = event.retryNote {
+                        fact(event.command == nil ? "Command" : "Retry") { Text(note).font(.system(size: 12)) }
                     }
                     if !event.reason.isEmpty { fact("Why") { Text(event.reason).font(.system(size: 12.5)) } }
                     if !event.subject.isEmpty {
@@ -161,6 +181,18 @@ struct EventDetail: View {
                 .frame(maxWidth: .infinity, alignment: .leading)
             }
             HStack(spacing: 8) {
+                if let id = event.approvalEventID {
+                    Button("Allow one retry") { confirmRetry = true }.buttonStyle(.quiet)
+                        .alert("Allow this command once?", isPresented: $confirmRetry) {
+                            Button("Cancel", role: .cancel) {}
+                            Button("Allow one retry") {
+                                Task { retryMessage = await model.approveCommand(id) }
+                            }
+                        } message: {
+                            Text("Retry the same command in the same session and directory within five minutes. A downloaded script can change between attempts.\n\n" + (event.command ?? ""))
+                        }
+                }
+                if let retryMessage { Text(retryMessage).font(.caption) }
                 ForEach(Array(event.actions.enumerated()), id: \.offset) { _, action in button(action) }
                 if let message = message { Text(message).font(.system(size: 11.5)).foregroundStyle(Palette.quiet).lineLimit(2) }
                 Spacer()

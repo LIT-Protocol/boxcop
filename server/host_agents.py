@@ -300,7 +300,15 @@ def hook(harness, directory):
         # unavailable audit must produce an explicit deny before the harness times out.
         # Allow brief writer contention between callbacks within the 3s deadline.
         engine = Engine(_private_store(str(directory), timeout=1), classifier=ContentClassifier())
-        record = engine.evaluate(EventInput(**event))
+        raw_command = None
+        scoped = False
+        if event['action'] == 'command':
+            fields = payload.get('tool_input', payload)
+            raw_command = fields['command']
+            session = (payload.get('conversation_id', payload.get('session_id')) if imported else
+                       payload.get('conversation_id' if harness == 'cursor' else 'session_id'))
+            scoped = bool(session and event['source'].partition(':')[2].startswith('/'))
+        record = engine.evaluate(EventInput(**event), raw_command=raw_command, scoped=scoped)
         allowed = record.decision.action == 'allow'
         if not allowed:
             explanation = ' '.join(record.decision.reasons) + ' ' + MESSAGE + ' Reference: ' + record.id

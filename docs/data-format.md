@@ -146,7 +146,7 @@ and owned by the user.
 
 | Path | Contents | Holds command text or content? |
 | --- | --- | --- |
-| `events.sqlite3` | Decision audit: one row per evaluated agent action with the agent, action kind, hashed session, working directory, matched policies and decision | No. Content is stored as `[not retained]`. |
+| `events.sqlite3` | Decision audit: one row per evaluated agent action with the agent, action kind, hashed session, working directory, matched policies and decision | Denied shell commands have a separate sanitized review copy in `command_reviews`. File content is omitted. |
 | `<agent>-receipt.json`, `<agent>-<action>-receipt.json` | Last hook callback per agent and per action | No |
 | `agent-integrations.json`, `*.config-backup` | What BoxCop added to agent settings, and exact backups of the settings it edited | The backups are copies of your agent settings |
 | `package-protection/` | The verified malware list (`policy.json`), keys for local artifact links, `blocks.json`, the releases you have allowed (`exceptions.json`, at most 200) | Package names and versions |

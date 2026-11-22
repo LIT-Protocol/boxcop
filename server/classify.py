@@ -53,7 +53,7 @@ def classify(text: str) -> list[str]:
     labels = []
     if PRIVATE_KEY.search(text):
         labels.extend(("secret", "private-key"))
-    elif SECRET_TOKEN.search(text) or any(not redacted_assignment(m) for m in SECRET_ASSIGNMENT.finditer(text)) or OTP.search(text):
+    elif SECRET_TOKEN.search(text) or any(literal_assignment(m) for m in SECRET_ASSIGNMENT.finditer(text)) or OTP.search(text):
         labels.append("secret")
     if restricted_business(text):
         labels.append('restricted-business')
@@ -67,6 +67,24 @@ def classify(text: str) -> list[str]:
     if HR.search(text) or re.search(r"\bemployee\s+[^.!?\n]{1,100}\b(?:salary|compensation)\s*(?:of\s+|is\s+|[:=]\s*)?\$\s*\d", text, re.I):
         labels.append("hr-sensitive")
     return labels
+
+
+# A quoted HTTP header can contain a reference that the shell expands later.
+# Match the entire reference, so a literal bearer value still classifies.
+BEARER_REFERENCE = re.compile(r"""Authorization:\s*Bearer\s+\$(?:[A-Za-z_]\w*|\{[A-Za-z_]\w*\})(["'])""", re.I)
+JS_TYPE_CHECK = re.compile(r"[\w-]+[ \t]*=[ \t]*typeof[ \t]+[A-Za-z_$][\w$]*[ \t]*={2,3}")
+
+
+def literal_assignment(match) -> bool:
+    text = match.string
+    if re.fullmatch(r"[\w-]+[ \t]*={2,3}", match[0]):
+        return False
+    if JS_TYPE_CHECK.match(text, match.start()):
+        return False
+    header = BEARER_REFERENCE.fullmatch(match[0])
+    if header and match.start() and text[match.start() - 1] == header[1]:
+        return False
+    return not redacted_assignment(match)
 
 
 def redacted_assignment(match) -> bool:

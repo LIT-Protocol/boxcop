@@ -97,6 +97,9 @@ public struct SecurityEvent: Decodable, Identifiable, Equatable, Sendable {
     public let subject: String
     public let agent: String?
     public let command: String?
+    public private(set) var workingDirectory: String?
+    public private(set) var retryNote: String?
+    public private(set) var canApprove = false
     public let package: String?
     public let host: String?
     public let policyIDs: [String]
@@ -131,7 +134,10 @@ public struct SecurityEvent: Decodable, Identifiable, Equatable, Sendable {
         self.id = id; time = date; self.layer = layer; self.outcome = outcome; self.title = title
         reason = try text("reason", limit: 1000) ?? ""
         subject = try text("subject", limit: 500) ?? ""
-        agent = try text("agent", limit: 32); command = try text("command", limit: 4096)
+        agent = try text("agent", limit: 32); command = try text("command", limit: 32768)
+        workingDirectory = try text("working_directory", limit: 1024)
+        retryNote = try text("retry_note", limit: 500)
+        canApprove = try c.decodeIfPresent(Bool.self, forKey: WireKey("can_approve")) ?? false
         package = try text("package", limit: 255); host = try text("host", limit: 255)
         policyIDs = Array((try c.decodeIfPresent([String].self, forKey: WireKey("policy_ids")) ?? []).prefix(32))
         // Added with install gate exceptions; an older engine omits all three.
@@ -162,7 +168,7 @@ public enum EngineCommand: Sendable, CustomStringConvertible {
     /// `allow` and `revoke` name one exact release; the other actions take none.
     case packageProtection(PackageProtectionAction, release: PackageRelease? = nil)
     case scriptProtection(ScriptProtectionAction, package: String = "", host: String = "")
-    case status, securityEvents(Int), shutdown, workflowContext(WorkflowContext)
+    case approveCommand(String), status, securityEvents(Int), shutdown, workflowContext(WorkflowContext)
     /// Forgets the reviewer's context. With `removeModel` it also deletes the downloaded model, which the engine does only while the runtime is stopped.
     case workflowClear(removeModel: Bool = false)
     public var operation: String {
@@ -172,6 +178,7 @@ public enum EngineCommand: Sendable, CustomStringConvertible {
         case .workflowContext: return "workflow_context"
         case .workflowClear: return "workflow_clear"
         case .status: return "status"
+        case .approveCommand: return "approve_command"
         case .securityEvents: return "security_events"
         case .shutdown: return "shutdown"
         }
@@ -201,6 +208,8 @@ private struct Request: Encodable {
             try c.encode(action.rawValue, forKey: WireKey("action"))
             try c.encode(package, forKey: WireKey("package")); try c.encode(host, forKey: WireKey("host"))
         case let .workflowContext(context): try c.encode(context, forKey: WireKey("context"))
+        case let .approveCommand(id):
+            try c.encode(id, forKey: WireKey("event_id"))
         case let .securityEvents(limit):
             guard (1...200).contains(limit) else { throw EngineFailure.invalidRequest }
             try c.encode(limit, forKey: WireKey("limit"))
@@ -241,12 +250,12 @@ public struct WorkflowAssessment: Decodable, Sendable {
 public enum EngineResult: Sendable {
     case packageProtection(PackageProtectionStatus)
     case scriptProtection(ScriptProtectionStatus)
-    case status(EngineStatus), securityEvents([SecurityEvent]), stopped, workflow(WorkflowAssessment)
+    case commandApproved(Bool), status(EngineStatus), securityEvents([SecurityEvent]), stopped, workflow(WorkflowAssessment)
     /// `removal` is reported only when the request asked for the model to be removed.
     case workflowCleared(removal: ModelRemoval?)
     func matches(_ operation: String) -> Bool {
         switch (self, operation) {
-        case (.packageProtection, "package_protection"), (.scriptProtection, "script_protection"), (.workflow, "workflow_context"),
+        case (.commandApproved, "approve_command"), (.packageProtection, "package_protection"), (.scriptProtection, "script_protection"), (.workflow, "workflow_context"),
              (.workflowCleared, "workflow_clear"), (.status, "status"), (.securityEvents, "security_events"), (.stopped, "shutdown"): return true
         default: return false
         }
@@ -311,6 +320,9 @@ private struct ResultPayload: Decodable {
                   try peek.decodeIfPresent(Bool.self, forKey: WireKey("monitoring")) ?? false == false,
                   try peek.decodeIfPresent(Bool.self, forKey: WireKey("network_listener")) ?? (registry || scripts) == (registry || scripts) else { throw EngineFailure.notReady }
             result = .status(EngineStatus(packageRegistryListener: registry, installScriptListener: scripts))
+        } else if peek.contains(WireKey("commandApproved")) {
+            let c = try decoder.object(["commandApproved"])
+            result = .commandApproved(try c.field("commandApproved"))
         } else if peek.contains(WireKey("events")) {
             let c = try decoder.object(["events"])
             result = .securityEvents(try Self.events(c))

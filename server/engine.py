@@ -4,6 +4,8 @@ This module never executes an action. It evaluates what a pre-action hook
 reports: a shell command, or a native file read or write.
 """
 from datetime import datetime, timezone
+import hashlib
+import json
 import re
 from threading import RLock
 from time import perf_counter
@@ -37,12 +39,12 @@ class Engine:
         self.workflow_context = WorkflowContextStore()
         self._lock = RLock()
 
-    def evaluate(self, event: EventInput) -> Record:
+    def evaluate(self, event: EventInput, *, raw_command=None, scoped=False) -> Record:
         # Serialize the decision and its audit save.
         with self._lock:
-            return self._evaluate(event)
+            return self._evaluate(event, raw_command, scoped)
 
-    def _evaluate(self, event: EventInput) -> Record:
+    def _evaluate(self, event: EventInput, raw_command, scoped) -> Record:
         start = perf_counter()
         created_at = self.clock().astimezone(timezone.utc).isoformat()
         labels = self.classifier.labels(event.content)
@@ -105,5 +107,18 @@ class Engine:
             policy_ids=[item[0] for item in matches], labels=labels,
             latency_ms=round((perf_counter() - start) * 1000, 3),
         ))
-        self.store.save(record)
+        if raw_command is not None and is_command and action != 'allow':
+            # Preserve lines for inspection. Only offer approval when every character
+            # is visible and the displayed command is identical to the original.
+            display = '\n'.join(sanitize_metadata(line, truncate=False) for line in raw_command.split('\n'))
+            if sensitive:
+                display = '[Command withheld because it contains sensitive data]'
+            fingerprint = None
+            if (scoped and display == raw_command and all(c.isprintable() or c == '\n' for c in display)
+                    and set(record.decision.policy_ids) <= {'remote-shell', 'download-then-exec'}):
+                identity = [event.model_dump(), raw_command, sorted(record.decision.policy_ids)]
+                fingerprint = hashlib.sha256(json.dumps(identity, sort_keys=True).encode()).hexdigest()
+            self.store.save(record, command=display, fingerprint=fingerprint)
+        else:
+            self.store.save(record)
         return record

@@ -116,7 +116,7 @@ you, except the network extension's history, which is under
 `/Library/Application Support/BoxCopNetwork.noindex/`.
 
 - A decision audit of agent actions. It holds the agent, the kind of action and
-  the rule that matched. It does not hold command text or file content.
+  the rule that matched. Denied shell commands include a local review copy with recognized sensitive details removed.
 - Logs of blocked packages and blocked connections, with package names and
   hostnames only, and the list of releases and destinations you have allowed.
 - Connection history from the network extension, encrypted, with process and

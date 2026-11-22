@@ -41,6 +41,10 @@ public struct FeedEvent: Identifiable, Equatable, Sendable {
     /// Why, in plain words.
     public let reason: String
     /// What exactly: package@version, host, or the redacted command.
+    public private(set) var command: String?
+    public private(set) var workingDirectory: String?
+    public private(set) var retryNote: String?
+    public private(set) var approvalEventID: String?
     public let subject: String
     /// The agent or app it came from.
     public let source: String
@@ -78,6 +82,8 @@ public struct FeedEvent: Identifiable, Equatable, Sendable {
         var lines = ["BoxCop event", "What happened: \(title)", "Status: \(status.label)", "Layer: \(layer.name)", "When: \(stamp)"]
         if !reason.isEmpty { lines.append("Why: \(reason)") }
         if !subject.isEmpty { lines.append("What exactly: \(subject)") }
+        if let command { lines.append("Command: \(command)") }
+        if let workingDirectory { lines.append("Directory: \(workingDirectory)") }
         if !chain.isEmpty { lines.append("Started by: \(chain.joined(separator: " -> "))") }
         if let signing { lines.append("Signed by: \(signing)") }
         if !policyIDs.isEmpty { lines.append("Rules: \(policyIDs.joined(separator: ", "))") }
@@ -104,7 +110,7 @@ extension FeedEvent {
         let agent = event.agent.map(AgentHookHealth.displayName)
         var chain: [String] = []
         if let agent { chain.append(agent) }
-        if let command = event.command { chain.append(command) }
+        if layer == .containment, let command = event.command { chain.append(command) }
         if layer == .containment, let package = event.package { chain.append("install script of \(package)") }
         let exception: ScriptDestinationException?
         if layer == .containment, status == .blocked, let package = event.package, let host = event.host {
@@ -119,6 +125,10 @@ extension FeedEvent {
                   subject: event.subject.isEmpty ? (event.package ?? event.host ?? event.command ?? "") : event.subject,
                   source: agent ?? (layer == .agentChecks ? "Agent" : "Package install"), chain: chain, policyIDs: event.policyIDs,
                   release: event.release, allowable: status == .blocked && event.allowable, exception: exception)
+        command = event.command
+        workingDirectory = event.workingDirectory
+        retryNote = event.retryNote
+        approvalEventID = event.canApprove ? event.id : nil
     }
     public static let reportedNotice = "Reported as malware, not yet confirmed"
 
@@ -172,7 +182,7 @@ public struct EventFilter: Equatable, Sendable {
         if let layer, event.layer != layer { return false }
         let query = search.trimmingCharacters(in: .whitespaces)
         guard !query.isEmpty else { return true }
-        return [event.title, event.subject, event.source, event.reason].contains { $0.localizedCaseInsensitiveContains(query) }
+        return [event.title, event.subject, event.source, event.reason, event.command ?? "", event.workingDirectory ?? ""].contains { $0.localizedCaseInsensitiveContains(query) }
     }
 }
 

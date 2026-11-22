@@ -33,7 +33,7 @@ private struct LayerCard<Content: View>: View {
     let layer: LayerStatus
     @ViewBuilder var content: Content
 
-    private var busy: Bool { model.busyLayers.contains(layer.id) || (layer.id == .outboundControl && model.network.busy) }
+    private var busy: Bool { layer.state == .working || model.busyLayers.contains(layer.id) || (layer.id == .outboundControl && model.network.busy) }
     private var hasTest: Bool { [.installGate, .outboundControl, .agentChecks].contains(layer.id) }
     private var pausedHere: Bool { model.paused && [.installGate, .containment, .outboundControl].contains(layer.id) }
 
@@ -46,7 +46,7 @@ private struct LayerCard<Content: View>: View {
                 Spacer()
                 if hasTest { Button("Test") { model.testSheet = layer.id }.buttonStyle(.quiet) }
                 if layer.state == .needsSetup && !busy && model.fixable(layer) { Button("Fix") { model.fixLayer(layer.id) }.buttonStyle(.quiet) }
-                Toggle("", isOn: Binding(get: { layer.state == .on || (layer.state == .needsSetup && model.wants(layer.id)) },
+                Toggle("", isOn: Binding(get: { layer.state == .on || ((layer.state == .needsSetup || layer.state == .working) && model.wants(layer.id)) },
                                          set: { model.setLayer(layer.id, on: $0) }))
                     .toggleStyle(SwitchStyle()).labelsHidden()
                     .disabled(layer.state == .unavailable || busy || pausedHere)

@@ -41,7 +41,7 @@ enum Palette {
         switch state {
         case .on: return green
         case .needsSetup: return amber
-        case .off, .unavailable: return quiet
+        case .off, .unavailable, .working: return quiet
         }
     }
     static func color(_ status: FeedEvent.Status) -> Color {

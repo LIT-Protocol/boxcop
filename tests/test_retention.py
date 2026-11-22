@@ -64,14 +64,17 @@ def test_store_accepts_a_record_without_content(tmp_path):
     assert Store(store.path).get_event(sample.id)["id"] == sample.id
 
 
-def test_database_schema_holds_no_content_or_fingerprint_columns(tmp_path):
+def test_command_reviews_are_separate_from_decision_records(tmp_path):
     store = Store(tmp_path / "events.db")
     Engine(store).evaluate(event())
     with store.connection() as db:
         columns = {row[1] for row in db.execute("PRAGMA table_info(events)")}
+        review_columns = {row[1] for row in db.execute("PRAGMA table_info(command_reviews)")}
+        assert db.execute("SELECT COUNT(*) FROM command_reviews").fetchone()[0] == 0
         tables = {row[0] for row in db.execute("SELECT name FROM sqlite_master WHERE type='table' AND name NOT LIKE 'sqlite_%'")}
     assert columns == {"sequence", "id", "created_at", "decision", "latency_ms", "action", "record"}
-    assert tables == {"events", "policies", "classifier_usage"}
+    assert tables == {"events", "policies", "classifier_usage", "command_reviews"}
+    assert review_columns == {"event_id", "command", "fingerprint", "approved_until", "consumed"}
 
 
 def test_database_file_is_private(tmp_path):

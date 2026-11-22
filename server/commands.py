@@ -90,8 +90,24 @@ def has_network_tool(text: str) -> bool:
     return bool(NETWORK.search(text))
 
 
+# A common inline JSON reader. Recognize the complete literal program before
+# splitting shell regions, since it contains a Python statement separator.
+JSON_READER = re.compile(
+    r"""(?<=\|)\s*python(?:[23](?:\.\d+)?)?\s+-c\s+(?P<quote>["'])"""
+    r"""import\s+json,\s*sys;\s*print\(json\.load\(sys\.stdin\)"""
+    r"""(?:\[(?:'\w+'|"\w+"|\d+)\])*\)(?P=quote)(?=\s|[|;&]|$)"""
+)
+# A plain curl GET writes to stdout. It leaves no downloaded file for a
+# subsequent interpreter when its output is neither redirected nor piped.
+STDOUT_GET = re.compile(
+    r"""\s*curl\s+(?:(?:-[sfSL]+|(?:-m|--max-time)\s+\d+)\s+)*"""
+    r"""https?://[A-Za-z0-9./_:%?=~-]+\s*"""
+)
+
+
 def remote_execution(text: str) -> bool:
     """Flag recognizable fetch/decode flows into execution, without running them."""
+    text = JSON_READER.sub(" python -m json.tool ", text)
     for region in SEPARATORS.split(text):
         # PowerShell commonly passes expression-valued downloads without a pipe.
         if re.search(r'\b(?:iex|invoke-expression)\b', region, re.I) and _source(region):
@@ -138,7 +154,7 @@ def download_then_execute(text: str) -> bool:
             _interpreter(words[0]) or re.search(r'\bchmod\b[^;\r\n]*\+x\b', region)
         ):
             return True
-        downloaded |= bool(FETCH.search(region))
+        downloaded |= bool(FETCH.search(region)) and not STDOUT_GET.fullmatch(region)
     return False
 
 

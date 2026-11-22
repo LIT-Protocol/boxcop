@@ -24,6 +24,12 @@ MESSAGES = {
 }
 
 
+@pytest.fixture(autouse=True)
+def isolated_home(tmp_path, monkeypatch):
+    # The feed also reads package and containment logs relative to the home directory.
+    monkeypatch.setenv("HOME", str(tmp_path))
+
+
 def child_env():
     # Copy, never mutate the caller's environment or umask.
     env = dict(os.environ, PYTHONDONTWRITEBYTECODE="1")
@@ -190,11 +196,15 @@ def test_hook_decisions_are_reported_as_security_events_over_the_pipe(tmp_path):
         assert set(reply) == {"version", "id", "ok", "result"} and set(reply["result"]) == {"events"}
         event, = reply["result"]["events"]  # The allowed action is not an event.
         assert set(event) == {"id", "time", "layer", "outcome", "title", "reason", "subject", "agent", "command",
-                              "package", "host", "policy_ids", "ecosystem", "version", "allowable"}
+                              "package", "host", "policy_ids", "ecosystem", "version", "allowable",
+                              "can_approve", "working_directory", "retry_note"}
         assert event["layer"] == "agent_actions" and event["outcome"] == "blocked" and event["agent"] == "claude"
         assert event["title"] == "Blocked Claude Code from sending sensitive data"
         assert "command-sensitive-egress" in event["policy_ids"]
-        assert event["command"] is None  # The audit store keeps no command text.
+        assert event["command"] == "[Command withheld because it contains sensitive data]"
+        assert event["working_directory"] == str(tmp_path)
+        assert event["can_approve"] is False and event["retry_note"]
+        assert client.send(request("approve_command", event_id=event["id"]))["result"] == {"commandApproved": False}
         assert marker.encode() not in client.transcript
         client.send(request("shutdown"))
         assert client.process.wait(timeout=5) == 0

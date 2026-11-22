@@ -103,7 +103,12 @@ the same user, not tamper-proof records.
 Each decision goes to the private audit database
 `~/Library/Application Support/BoxCop/events.sqlite3` with the agent name, the
 kind of action, a hashed session identifier, the reported working directory and
-the policies that matched. Command text and file content are not stored there.
+the policies that matched. For denied shell commands, the hook saves a local review copy with recognizable
+credentials and URL parameters removed. Commands flagged for sensitive content
+are withheld. Select the event and expand Command to inspect it. For a fully
+visible command flagged only for download and execution, **Allow one retry**
+permits the same command, agent session and directory for five minutes. Start
+the retry in the agent. Approving does not execute the command.
 The session, working directory and parent process are what the agent reported;
 they are not verified.
 

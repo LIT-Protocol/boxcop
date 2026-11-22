@@ -1,4 +1,4 @@
-"""SQLite audit persistence. Raw action content is never stored."""
+"""SQLite decision audit and local review copies of denied hook commands."""
 from contextlib import contextmanager
 import json
 import os
@@ -33,6 +33,11 @@ class Store:
                 action TEXT NOT NULL,
                 record TEXT NOT NULL
             )""")
+            db.execute("""CREATE TABLE IF NOT EXISTS command_reviews (
+                event_id TEXT PRIMARY KEY, command TEXT NOT NULL, fingerprint TEXT,
+                approved_until INTEGER, consumed INTEGER NOT NULL DEFAULT 0
+            )""")
+            db.execute("CREATE INDEX IF NOT EXISTS approved_commands ON command_reviews(fingerprint) WHERE consumed=0 AND approved_until IS NOT NULL")
             db.execute("CREATE INDEX IF NOT EXISTS events_filter ON events(decision, sequence)")
             db.execute("CREATE TABLE IF NOT EXISTS policies (id TEXT PRIMARY KEY, enabled INTEGER NOT NULL CHECK(enabled IN (0,1)))")
             db.execute("""CREATE TABLE IF NOT EXISTS classifier_usage (
@@ -74,12 +79,31 @@ class Store:
             db.execute("""INSERT INTO classifier_usage(backend, counter, count) VALUES (?, ?, 1)
                 ON CONFLICT(backend, counter) DO UPDATE SET count=count+1""", (backend, counter))
 
-    def save(self, record: Record) -> None:
+    def save(self, record: Record, *, command=None, fingerprint=None) -> None:
         if record.event.content != NOT_RETAINED:
             raise ValueError("Content must be removed before persistence")
         with self.connection() as db:
-            db.execute("INSERT INTO events(id, created_at, decision, latency_ms, action, record) VALUES (?, ?, ?, ?, ?, ?)",
-                       (record.id, record.created_at, record.decision.action, record.decision.latency_ms, record.event.action, record.model_dump_json()))
+            if command is not None:
+                db.execute("BEGIN IMMEDIATE")
+                approval = db.execute("""SELECT event_id FROM command_reviews WHERE fingerprint=?
+                    AND approved_until >= unixepoch() AND consumed=0 LIMIT 1""", (fingerprint,)).fetchone()
+                if approval:
+                    db.execute("UPDATE command_reviews SET consumed=1 WHERE event_id=?", (approval[0],))
+                    record.decision.action = "allow"
+                    record.decision.summary = "User approved this command for one retry."
+                    record.decision.reasons = [record.decision.summary]
+                else:
+                    db.execute("INSERT INTO command_reviews(event_id,command,fingerprint) VALUES (?,?,?)",
+                               (record.id, command, fingerprint))
+            db.execute("INSERT INTO events(id,created_at,decision,latency_ms,action,record) VALUES (?,?,?,?,?,?)",
+                       (record.id, record.created_at, record.decision.action, record.decision.latency_ms,
+                        record.event.action, record.model_dump_json()))
+
+    def approve_command(self, event_id):
+        with self.connection() as db:
+            return db.execute("""UPDATE command_reviews SET approved_until=unixepoch()+300
+                WHERE event_id=? AND fingerprint IS NOT NULL AND consumed=0
+                AND (approved_until IS NULL OR approved_until < unixepoch())""", (event_id,)).rowcount == 1
 
     def get_event(self, event_id: str):
         with self.connection() as db:
@@ -102,8 +126,23 @@ class Store:
             # Keep count and page in one snapshot despite concurrent writers.
             db.execute("BEGIN")
             total = db.execute("SELECT COUNT(*) FROM events" + where, params).fetchone()[0]
-            rows = db.execute("SELECT record FROM events" + where + " ORDER BY sequence DESC LIMIT ? OFFSET ?", [*params, limit, offset]).fetchall()
-        return {"items": [json.loads(row[0]) for row in rows], "total": total}
+            rows = db.execute("SELECT record,command,fingerprint,approved_until,consumed,unixepoch() FROM events LEFT JOIN command_reviews ON event_id=id" + where + " ORDER BY sequence DESC LIMIT ? OFFSET ?", [*params, limit, offset]).fetchall()
+        items = []
+        for row in rows:
+            item = json.loads(row[0])
+            if row[1] is not None:
+                if row[4]:
+                    state = "The approved retry was used."
+                elif (row[3] or 0) >= row[5]:
+                    state = "Approved for one retry in the original agent session and directory."
+                elif not row[2]:
+                    state = ("Approval requires a download-and-execute rule as the only concern, a fully visible "
+                             "command and a reported session and working directory.")
+                else:
+                    state = None
+                item["command_review"] = {"command": row[1], "can_approve": state is None, "retry_note": state}
+            items.append(item)
+        return {"items": items, "total": total}
 
     def stats(self):
         with self.connection() as db:

@@ -491,6 +491,14 @@ struct NeedsYouItem: Identifiable {
         }
     }
 
+    func approveCommand(_ id: String) async -> String {
+        guard case let .commandApproved(approved)? = await request(.approveCommand(id)) else {
+            return "Could not reach the engine to approve this retry."
+        }
+        if case let .securityEvents(events)? = await request(.securityEvents(200)) { securityEvents = events }
+        return approved ? "Approved. Retry in the agent within five minutes." : "This event is no longer available for approval."
+    }
+
     // MARK: Install gate
 
     /// Lets package managers install one exact release that is reported as malware but not confirmed.

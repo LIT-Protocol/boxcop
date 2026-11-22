@@ -173,7 +173,8 @@ struct NeedsYouItem: Identifiable {
         let all = [
             LayerRules.installGate(engineAvailable: capabilities.engine, engineRunning: running, wanted: wants(.installGate),
                                    configured: packageStatus?.configured, routed: packageStatus?.routed ?? false, listening: packageStatus?.active ?? false,
-                                   stale: packageStatus?.stale ?? false, feedDate: packageStatus?.generatedAt),
+                                   stale: packageStatus?.stale ?? false, feedDate: packageStatus?.generatedAt,
+                                   busy: packageStatus?.busy == true, summary: packageStatus?.summary),
             LayerRules.containment(engineAvailable: capabilities.engine, engineRunning: running, wanted: wants(.containment),
                                    routed: scriptStatus?.routed ?? false, listening: scriptStatus?.active ?? false),
             LayerRules.outboundControl(bundled: capabilities.networkExtension, placementIssue: capabilities.networkPlacementIssue,
@@ -194,7 +195,7 @@ struct NeedsYouItem: Identifiable {
     }
     /// Whether a Fix button would do anything. A model download only needs time.
     func fixable(_ layer: LayerStatus) -> Bool {
-        layer.id != .smartTriage || judgment?.setup?.state == "error"
+        layer.state == .needsSetup && (layer.id != .smartTriage || judgment?.setup?.state == "error")
     }
     func layer(_ id: LayerID) -> LayerStatus { layers.first { $0.id == id }! }
     var summary: ProtectionSummary { ProtectionSummary(layers: layers, paused: paused) }
@@ -433,7 +434,10 @@ struct NeedsYouItem: Identifiable {
     func fixLayer(_ id: LayerID) {
         guard !preview else { return }
         switch id {
-        case .installGate, .containment:
+        case .installGate:
+            setWanted(.installGate, true)
+            if engineState == .running { enablePackages() } else { restartEngine() }
+        case .containment:
             if engineState == .running { Task { await reconcile() } } else { restartEngine() }
         case .outboundControl:
             setWanted(.outboundControl, true)

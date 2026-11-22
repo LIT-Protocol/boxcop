@@ -36,12 +36,14 @@ public enum LayerID: String, CaseIterable, Codable, Sendable, Identifiable {
 
 public enum LayerState: String, Codable, Sendable {
     case on, off
+    case working
     case needsSetup = "needs_setup"
     case unavailable
     public var label: String {
         switch self {
         case .on: return "On"
         case .off: return "Off"
+        case .working: return "In progress"
         case .needsSetup: return "Needs setup"
         case .unavailable: return "Unavailable"
         }
@@ -114,15 +116,17 @@ public enum LayerRules {
     public static let engineMissing = "This build does not include the BoxCop engine."
 
     public static func installGate(engineAvailable: Bool, engineRunning: Bool, wanted: Bool, configured: Bool?, routed: Bool, listening: Bool,
-                                   stale: Bool = false, feedDate: String? = nil) -> LayerStatus {
+                                   stale: Bool = false, feedDate: String? = nil, busy: Bool = false, summary: String? = nil) -> LayerStatus {
         guard engineAvailable else { return .init(.installGate, .unavailable, engineMissing) }
         if configured == false { return .init(.installGate, .unavailable, "This build has no malware feed channel configured.") }
+        if busy { return .init(.installGate, .working, summary ?? "Updating package protection.") }
         if routed && listening {
-            let dated = feedDate.map { "Feed dated \(String($0.prefix(10)))." } ?? "npm and pip installs go through the local check."
+            let dated = feedDate.map { "Feed dated \(String($0.prefix(10)))." } ?? "npm and pnpm installs go through the local check."
             return .init(.installGate, .on, stale ? "On, but the malware feed is out of date. BoxCop will retry the update." : dated)
         }
-        if routed { return .init(.installGate, .needsSetup, engineRunning ? "npm and pip are routed to BoxCop but the local check is not answering. Choose Fix to restart it." : "npm and pip are routed to BoxCop but its engine is not running. Open BoxCop to start it.") }
-        if wanted { return .init(.installGate, .needsSetup, engineRunning ? "Turning on. BoxCop is routing npm and pip through the local check." : "Waiting for the BoxCop engine to start.") }
+        if engineRunning, wanted || routed, let summary { return .init(.installGate, .needsSetup, summary) }
+        if routed { return .init(.installGate, .needsSetup, engineRunning ? "npm and pnpm are routed to BoxCop but the local check is not answering. Choose Fix to restart it." : "npm and pnpm are routed to BoxCop but its engine is not running. Open BoxCop to start it.") }
+        if wanted { return .init(.installGate, .needsSetup, engineRunning ? "Package routing is inactive. Choose Fix to enable it." : "Waiting for the BoxCop engine to start.") }
         return .init(.installGate, .off, "Turn on the install gate in BoxCop.")
     }
 
@@ -221,7 +225,7 @@ public struct ProtectionSummary: Equatable, Sendable {
             sentence = "Package checks, containment and threat blocking are off until you resume."
         } else if enforcingOn.isEmpty {
             overall = .notProtected
-            sentence = "Nothing is enforcing yet. Turn on a layer below."
+            sentence = layers.contains { $0.state == .working } ? Self.gaps(layers) : "Nothing is enforcing yet. Turn on a layer below."
         } else if enforcingOn.count == enforcing.count && !layers.contains(where: { $0.state == .needsSetup }) {
             // Layers 1 to 4 are all enforcing and nothing that was turned on is waiting.
             overall = .protected
@@ -239,6 +243,8 @@ public struct ProtectionSummary: Equatable, Sendable {
         func count(_ state: LayerState) -> Int { layers.filter { $0.state == state }.count }
         let off = count(.off), setup = count(.needsSetup), unavailable = count(.unavailable)
         var parts: [String] = []
+        let working = count(.working)
+        if working > 0 { parts.append("\(working) \(working == 1 ? "is" : "are") in progress") }
         if setup > 0 { parts.append("\(setup) need\(setup == 1 ? "s" : "") setup") }
         if off > 0 { parts.append("\(off) \(off == 1 ? "is" : "are") off") }
         if unavailable > 0 { parts.append("\(unavailable) \(unavailable == 1 ? "is" : "are") unavailable") }

@@ -23,6 +23,17 @@ final class AppModelTests: XCTestCase {
         XCTAssertNotNil(menu.dot)
     }
 
+    @MainActor func testPackageSetupOffersRepairOnlyAfterTheWorkerFinishes() throws {
+        let model = try Fixtures.model(.protected)
+        for busy in [true, false] {
+            let summary = busy ? "Downloading and verifying the malware list…" : "Package signing key changed"
+            model.packageStatus = try Fixtures.decode(PackageProtectionStatus.self, #"{"configured":true,"routed":false,"active":false,"busy":\#(busy),"stale":true,"summary":"\#(summary)"}"#)
+            XCTAssertEqual(model.layer(.installGate), LayerStatus(.installGate, busy ? .working : .needsSetup, summary))
+            XCTAssertEqual(model.fixable(model.layer(.installGate)), !busy)
+            XCTAssertEqual(model.needsYou.contains { $0.id == LayerID.installGate.rawValue }, !busy)
+        }
+    }
+
     @MainActor func testProtectedStateIsQuiet() throws {
         let model = try Fixtures.model(.protected)
         XCTAssertTrue(model.needsYou.isEmpty)
